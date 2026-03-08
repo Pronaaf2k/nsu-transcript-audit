@@ -1,10 +1,8 @@
 name: Load Test (20 Concurrent Users)
 
 on:
-  # Run after successful merge to main
-  push:
-    branches: [main]
-  # Or trigger manually from GitHub UI
+  # Only run manually from GitHub UI — not on every push
+  # (requires SUPABASE_URL, SUPABASE_ANON_KEY, TEST_USER_JWT secrets to be set first)
   workflow_dispatch:
     inputs:
       vus:
