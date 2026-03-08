@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: nsu-audit-api
+    runtime: python
+    # Tesseract and poppler (for pdf2image) are installed via the build script
+    buildCommand: |
+      apt-get update && apt-get install -y tesseract-ocr poppler-utils &&
+      pip install -r api/requirements.txt
+    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    rootDir: .
+    envVars:
+      - key: AUDIT_API_KEY
+        generateValue: true      # Render auto-generates a secret value
+      - key: PYTHON_VERSION
+        value: "3.11.0"
+      - key: BATCH_WORKERS
+        value: "4"               # parallel Tesseract workers for bulk jobs

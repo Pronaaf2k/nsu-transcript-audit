@@ -1,0 +1,6 @@
+# The audit_src/ folder must contain:
+#   audit_l1.py   audit_l2.py   audit_l3.py   style.py   program.md
+#
+# These are copied from CSE226Proj1/ — see step-by-step instructions in TODO.md
+#
+# This file is a placeholder so git tracks the directory.

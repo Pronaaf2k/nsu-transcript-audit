@@ -1,0 +1,46 @@
+name: Load Test (20 Concurrent Users)
+
+on:
+  # Run after successful merge to main
+  push:
+    branches: [main]
+  # Or trigger manually from GitHub UI
+  workflow_dispatch:
+    inputs:
+      vus:
+        description: "Number of virtual users"
+        required: false
+        default: "20"
+      duration:
+        description: "Test duration (e.g. 60s)"
+        required: false
+        default: "60s"
+
+jobs:
+  load-test:
+    name: k6 Load Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup k6
+        uses: grafana/setup-k6-action@v1
+
+      - name: Run load test
+        run: |
+          k6 run \
+            --env SUPABASE_URL="${{ secrets.SUPABASE_URL }}" \
+            --env SUPABASE_ANON_KEY="${{ secrets.SUPABASE_ANON_KEY }}" \
+            --env TEST_USER_JWT="${{ secrets.TEST_USER_JWT }}" \
+            --vus ${{ github.event.inputs.vus || '20' }} \
+            --duration ${{ github.event.inputs.duration || '60s' }} \
+            --out json=load-tests/results.json \
+            load-tests/scan_load.js
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-load-test-results
+          path: load-tests/results.json

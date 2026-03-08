@@ -1,0 +1,14 @@
+{
+    "name": "nsu-transcript-audit",
+    "private": true,
+    "workspaces": [
+        "web",
+        "mobile"
+    ],
+    "scripts": {
+        "dev:web": "npm run dev --workspace=web",
+        "dev:mobile": "npm run start --workspace=mobile",
+        "lint": "npm run lint --workspaces --if-present",
+        "build": "npm run build --workspace=web"
+    }
+}
