@@ -1,3 +1,5 @@
+project_id = "imamqcvlmfkcbthxuxsq"
+
 [api]
 port = 54321
 
@@ -24,5 +26,5 @@ enabled = true
 client_id = "env(GOOGLE_CLIENT_ID)"
 secret = "env(GOOGLE_CLIENT_SECRET)"
 
-[functions]
+[functions.process-transcript]
 verify_jwt = true
