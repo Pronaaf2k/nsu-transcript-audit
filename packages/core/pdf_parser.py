@@ -79,7 +79,7 @@ Example output:
 [{"course_code": "CSE115", "course_name": "Programming Language I", "credits": 3, "grade": "A", "semester": "Spring", "year": 2023}]"""
 
         try:
-            model = genai.GenerativeModel('models/gemini-2.5-flash')
+            model = genai.GenerativeModel('models/gemini-2.5-flash-image')
             contents = [prompt]
             for img in pages_to_process:
                 contents.append(img)
