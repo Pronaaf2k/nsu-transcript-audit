@@ -1,14 +1,18 @@
 {
-    "name": "nsu-transcript-audit",
-    "private": true,
-    "workspaces": [
-        "web",
-        "mobile"
-    ],
-    "scripts": {
-        "dev:web": "npm run dev --workspace=web",
-        "dev:mobile": "npm run start --workspace=mobile",
-        "lint": "npm run lint --workspaces --if-present",
-        "build": "npm run build --workspace=web"
-    }
+  "name": "nsu-transcript-audit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GradeTrace — Academic transcript auditing platform for NSU",
+  "scripts": {
+    "dev:web": "pnpm --filter web dev",
+    "dev:api": "cd packages/api && uvicorn main:app --reload --port 8000",
+    "dev:mobile": "pnpm --filter mobile start",
+    "build:web": "pnpm --filter web build",
+    "start:web": "pnpm --filter web start",
+    "lint": "pnpm --filter web lint"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  }
 }

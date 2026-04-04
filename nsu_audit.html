@@ -1,0 +1,991 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NSU Graduation Audit System</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #0a0c10;
+    --surface: #111318;
+    --surface2: #181b22;
+    --border: #252833;
+    --border2: #2e3340;
+    --accent: #4ade80;
+    --accent-dim: #1a4a2e;
+    --warn: #fbbf24;
+    --warn-dim: #3a2d0a;
+    --danger: #f87171;
+    --danger-dim: #3a1212;
+    --info: #60a5fa;
+    --info-dim: #12244a;
+    --text: #e2e8f0;
+    --text2: #94a3b8;
+    --text3: #475569;
+    --mono: 'DM Mono', monospace;
+    --sans: 'Syne', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── HEADER ── */
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 18px 32px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: var(--surface);
+  }
+  .logo-mark {
+    width: 36px; height: 36px;
+    background: var(--accent);
+    border-radius: 6px;
+    display: grid;
+    place-items: center;
+    font-family: var(--mono);
+    font-weight: 500;
+    font-size: 13px;
+    color: #000;
+    letter-spacing: -0.5px;
+    flex-shrink: 0;
+  }
+  header h1 {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: var(--text);
+  }
+  header span {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text3);
+    margin-left: auto;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  /* ── LAYOUT ── */
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 360px 1fr;
+    height: calc(100vh - 61px);
+  }
+
+  /* ── LEFT PANEL ── */
+  .panel-left {
+    border-right: 1px solid var(--border);
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .panel-section {
+    padding: 20px 20px 0;
+  }
+  .panel-section:last-child { padding-bottom: 20px; }
+  .panel-section + .panel-section {
+    border-top: 1px solid var(--border);
+    margin-top: 20px;
+    padding-top: 20px;
+  }
+
+  label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text3);
+    margin-bottom: 8px;
+  }
+
+  select, textarea {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    outline: none;
+    transition: border 0.15s;
+  }
+  select:focus, textarea:focus {
+    border-color: var(--accent);
+  }
+  select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2394a3b8' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14L2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 32px;
+    cursor: pointer;
+  }
+  select option { background: #1a1d24; }
+
+  textarea {
+    resize: vertical;
+    min-height: 180px;
+    line-height: 1.6;
+  }
+
+  .hint {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text3);
+    margin-top: 6px;
+    line-height: 1.5;
+  }
+
+  /* ── LEVEL TABS ── */
+  .level-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 2px;
+  }
+  .level-tab {
+    flex: 1;
+    padding: 7px 0;
+    border: 1px solid var(--border2);
+    background: var(--surface2);
+    color: var(--text3);
+    font-family: var(--mono);
+    font-size: 11px;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: center;
+  }
+  .level-tab.active {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .level-tab:hover:not(.active) {
+    border-color: var(--border2);
+    color: var(--text2);
+    background: var(--surface);
+  }
+
+  /* ── WAIVERS ── */
+  #waiver-row {
+    margin-top: 14px;
+    display: none;
+  }
+  #waiver-row.visible { display: block; }
+
+  /* ── RUN BUTTON ── */
+  .btn-run {
+    margin: 20px;
+    padding: 14px;
+    background: var(--accent);
+    color: #000;
+    border: none;
+    border-radius: 7px;
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .btn-run:hover { filter: brightness(1.1); }
+  .btn-run:active { transform: scale(0.98); }
+  .btn-run:disabled {
+    background: var(--text3);
+    cursor: not-allowed;
+    filter: none;
+  }
+  .btn-run svg { width: 16px; height: 16px; }
+
+  /* ── SAMPLE BUTTONS ── */
+  .sample-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+  }
+  .btn-sample {
+    padding: 5px 10px;
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    color: var(--text2);
+    font-family: var(--mono);
+    font-size: 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.12s;
+    letter-spacing: 0.5px;
+  }
+  .btn-sample:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* ── RIGHT PANEL ── */
+  .panel-right {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .result-header {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+  .result-header h2 {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text2);
+    letter-spacing: 0.5px;
+  }
+
+  /* status badge */
+  .badge {
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    font-weight: 500;
+    margin-left: auto;
+  }
+  .badge.eligible   { background: var(--accent-dim);  color: var(--accent); }
+  .badge.ineligible { background: var(--danger-dim);  color: var(--danger); }
+  .badge.idle       { background: var(--surface2);    color: var(--text3); }
+  .badge.running    { background: var(--info-dim);     color: var(--info); animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+  .result-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+  }
+
+  /* ── EMPTY STATE ── */
+  .empty-state {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: var(--text3);
+    font-family: var(--mono);
+    font-size: 12px;
+    text-align: center;
+  }
+  .empty-state svg { opacity: 0.25; }
+  .empty-state p { line-height: 1.7; max-width: 260px; }
+
+  /* ── METRIC CARDS ── */
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .metric-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .metric-card .label {
+    font-family: var(--mono);
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    color: var(--text3);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    display: block;
+  }
+  .metric-card .value {
+    font-family: var(--mono);
+    font-size: 22px;
+    font-weight: 500;
+    line-height: 1;
+  }
+  .metric-card .sub {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text3);
+    margin-top: 4px;
+  }
+  .green { color: var(--accent); }
+  .red   { color: var(--danger); }
+  .yellow{ color: var(--warn); }
+  .blue  { color: var(--info); }
+
+  /* ── VERDICT BANNER ── */
+  .verdict {
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin-bottom: 20px;
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    letter-spacing: 0.5px;
+  }
+  .verdict.eligible   { background: var(--accent-dim); border: 1px solid var(--accent); color: var(--accent); }
+  .verdict.ineligible { background: var(--danger-dim); border: 1px solid var(--danger); color: var(--danger); }
+
+  /* ── SECTION HEADERS ── */
+  .section-head {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--text3);
+    margin: 20px 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section-head::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* ── COURSE TABLES ── */
+  .course-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    margin-bottom: 8px;
+  }
+  .course-table th {
+    text-align: left;
+    color: var(--text3);
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .course-table td {
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text2);
+  }
+  .course-table tr:last-child td { border-bottom: none; }
+  .course-table tr:hover td { background: var(--surface2); }
+  .course-table .status-ok    { color: var(--accent); }
+  .course-table .status-miss  { color: var(--danger); }
+  .course-table .status-warn  { color: var(--warn); }
+  .course-table .status-info  { color: var(--info); }
+  .course-table .mono-code    { color: var(--text); font-weight: 500; letter-spacing: 0.5px; }
+
+  /* ── SEMESTER TIMELINE ── */
+  .semester-block {
+    margin-bottom: 16px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .semester-head {
+    padding: 10px 14px;
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .semester-head .sem-name {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text);
+    letter-spacing: 0.5px;
+  }
+  .semester-head .sem-gpa {
+    margin-left: auto;
+    display: flex;
+    gap: 16px;
+  }
+  .semester-head .gpa-item {
+    font-family: var(--mono);
+    font-size: 10px;
+    text-align: right;
+  }
+  .semester-head .gpa-item .gkey { color: var(--text3); display: block; font-size: 9px; }
+  .probation-flag {
+    padding: 2px 7px;
+    background: var(--danger-dim);
+    border: 1px solid var(--danger);
+    border-radius: 3px;
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--danger);
+    letter-spacing: 1px;
+  }
+
+  /* ── ADVISORY CARDS ── */
+  .advisory-card {
+    display: flex;
+    gap: 10px;
+    background: var(--warn-dim);
+    border: 1px solid #5a4010;
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--warn);
+    line-height: 1.5;
+  }
+  .advisory-card .icon { flex-shrink: 0; margin-top: 1px; }
+
+  /* ── MISSING COURSES ── */
+  .missing-group {
+    margin-bottom: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .missing-group-head {
+    padding: 9px 14px;
+    background: var(--danger-dim);
+    border-bottom: 1px solid #4a1a1a;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 1px;
+    color: var(--danger);
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .missing-group-head .count-badge {
+    background: var(--danger);
+    color: #000;
+    border-radius: 3px;
+    padding: 1px 6px;
+    font-size: 9px;
+    font-weight: 700;
+  }
+  .missing-list { padding: 4px 0; }
+  .missing-item {
+    padding: 7px 14px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--text2);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .missing-item:last-child { border-bottom: none; }
+  .missing-item::before { content: '—'; color: var(--danger); }
+
+  /* ── FREE ELECTIVES ── */
+  .elec-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    border-radius: 4px;
+    padding: 4px 9px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--text2);
+    margin: 3px;
+  }
+  .elec-chip .cr { color: var(--text3); font-size: 9px; }
+  .elec-chip.excess { border-color: var(--warn); color: var(--warn); }
+  .elec-chip.invalid { border-color: var(--danger); color: var(--danger); }
+
+  /* ── SCROLLBAR ── */
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+  /* ── LOADING ── */
+  .loader {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 16px;
+    color: var(--text3);
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .spinner {
+    width: 32px; height: 32px;
+    border: 2px solid var(--border2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 800px) {
+    main { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    .panel-left { max-height: 50vh; }
+    .metrics { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo-mark">NSU</div>
+  <h1>Graduation Audit System</h1>
+  <span>CSE226 · Project 1 · Web</span>
+</header>
+
+<main>
+  <!-- LEFT PANEL -->
+  <div class="panel-left">
+    <div class="panel-section">
+      <label>Audit Level</label>
+      <div class="level-tabs">
+        <button class="level-tab active" data-level="1">L1 — Credit</button>
+        <button class="level-tab" data-level="2">L2 — CGPA</button>
+        <button class="level-tab" data-level="3">L3 — Full Audit</button>
+      </div>
+      <div class="hint">L1 tallies credits. L2 adds semester CGPA/probation. L3 is the full graduation audit.</div>
+    </div>
+
+    <div class="panel-section" id="program-row">
+      <label>Program</label>
+      <select id="program-select">
+        <option value="CSE">Computer Science &amp; Engineering</option>
+        <option value="ETE">Electronic &amp; Telecom Engineering</option>
+        <option value="ENV">Environmental Science &amp; Management</option>
+        <option value="ENG">English</option>
+        <option value="BBA">Business Administration</option>
+        <option value="ECO">Economics</option>
+      </select>
+    </div>
+
+    <div class="panel-section">
+      <label>Transcript Upload (PDF/Image)</label>
+      <input type="file" id="pdf-upload" accept="application/pdf,image/*" style="margin-bottom: 10px; width: 100%; color: var(--text2);" onchange="uploadPdf(this)">
+      <label>Extracted CSV Data</label>
+      <textarea id="transcript-input" placeholder="Course_Code,Credits,Grade,Semester"></textarea>
+      <div class="hint">Upload a PDF/Image to auto-extract, or paste CSV manually.</div>
+
+      <div class="sample-row">
+        <button class="btn-sample" data-sample="cse_pass">CSE Pass</button>
+        <button class="btn-sample" data-sample="cse_cgpa_low">CGPA Low</button>
+        <button class="btn-sample" data-sample="prereq_viol">Prereq Viol.</button>
+        <button class="btn-sample" data-sample="retake">Retake</button>
+        <button class="btn-sample" data-sample="bba">BBA</button>
+      </div>
+
+      <div id="waiver-row">
+        <label style="margin-top:14px">Grade T Waivers (comma-separated, or NONE)</label>
+        <input id="waivers-input" type="text" value="NONE"
+          style="width:100%;background:var(--surface2);border:1px solid var(--border2);
+                 color:var(--text);font-family:var(--mono);font-size:12px;
+                 padding:9px 12px;border-radius:6px;outline:none;" />
+      </div>
+    </div>
+
+    <button class="btn-run" id="run-btn" onclick="runAudit()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <polygon points="5,3 19,12 5,21"/>
+      </svg>
+      Run Audit
+    </button>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="panel-right">
+    <div class="result-header">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="2">
+        <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+        <rect x="9" y="3" width="6" height="4" rx="1"/>
+        <path d="M9 12h6M9 16h4"/>
+      </svg>
+      <h2>Audit Results</h2>
+      <span class="badge idle" id="status-badge">IDLE</span>
+    </div>
+    <div class="result-body" id="result-body">
+      <div class="empty-state">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+          <rect x="9" y="3" width="6" height="4" rx="1"/>
+          <path d="M9 12h6M9 16h4"/>
+        </svg>
+        <p>Paste a transcript CSV and click<br/><strong>Run Audit</strong> to see the report.</p>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+// ────────────────────────────────────────────────────────────────────────────
+// Sample transcripts
+// ────────────────────────────────────────────────────────────────────────────
+const SAMPLES = {
+  cse_pass: `Course_Code,Credits,Grade,Semester
+ENG102,3,A,Spring 2022
+MAT120,3,B+,Spring 2022
+PHY107,3,A-,Spring 2022
+PHY107L,1,A,Spring 2022
+CSE115,4,A,Spring 2022
+CSE173,3,B+,Spring 2022
+MAT216,3,A-,Summer 2022
+CSE225,3,B,Summer 2022
+CSE225L,0,B,Summer 2022
+CSE215,3,B+,Summer 2022
+CSE215L,0,B+,Summer 2022
+ENG202,3,A,Fall 2022
+CSE321,3,B,Fall 2022
+CSE321L,0,B,Fall 2022
+CSE311,3,A-,Fall 2022
+CSE325,3,B+,Fall 2022
+CSE325L,0,B+,Fall 2022
+CSE331,3,B+,Spring 2023
+CSE331L,0,B+,Spring 2023
+CSE373,3,A-,Spring 2023
+ECO101,3,B,Spring 2023
+CSE335,3,B,Summer 2023
+CSE335L,0,B,Summer 2023
+BUS101,3,B+,Summer 2023
+CSE411,3,A-,Fall 2023
+CSE421,3,B+,Fall 2023
+CSE421L,0,B+,Fall 2023
+CSE461,3,A-,Fall 2023
+SOC101,3,B,Fall 2023
+CSE499A,3,A,Spring 2024
+CSE499B,3,A,Spring 2024`,
+
+  cse_cgpa_low: `Course_Code,Credits,Grade,Semester
+ENG102,3,D,Spring 2022
+MAT120,3,D+,Spring 2022
+PHY107,3,D,Spring 2022
+PHY107L,1,C-,Spring 2022
+CSE115,4,D+,Spring 2022
+CSE173,3,D,Summer 2022
+MAT216,3,C-,Summer 2022
+CSE225,3,D,Summer 2022
+CSE225L,0,D,Summer 2022
+CSE215,3,D+,Summer 2022
+CSE215L,0,D+,Summer 2022`,
+
+  prereq_viol: `Course_Code,Credits,Grade,Semester
+ENG102,3,A,Spring 2022
+CSE115,4,A,Spring 2022
+CSE225,3,A,Spring 2022
+CSE225L,0,A,Spring 2022`,
+
+  retake: `Course_Code,Credits,Grade,Semester
+ENG102,3,A,Spring 2022
+CSE115,4,B+,Spring 2022
+CSE115,4,A,Summer 2022
+MAT120,3,F,Spring 2022
+MAT120,3,B,Summer 2022`,
+
+  bba: `Course_Code,Credits,Grade,Semester
+ENG102,3,A,Spring 2022
+BUS101,3,B+,Spring 2022
+ECO101,3,B,Spring 2022
+MAT120,3,A-,Spring 2022
+MGT101,3,B+,Summer 2022
+ACT201,3,B,Summer 2022
+MKT201,3,A-,Fall 2022
+FIN201,3,B+,Fall 2022`
+};
+
+// ────────────────────────────────────────────────────────────────────────────
+// State
+// ────────────────────────────────────────────────────────────────────────────
+let currentLevel = 1;
+
+// ────────────────────────────────────────────────────────────────────────────
+// Level tabs
+// ────────────────────────────────────────────────────────────────────────────
+document.querySelectorAll('.level-tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.level-tab').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentLevel = parseInt(btn.dataset.level);
+    const programRow = document.getElementById('program-row');
+    const waiverRow  = document.getElementById('waiver-row');
+    programRow.style.display = currentLevel === 3 ? '' : 'none';
+    if (currentLevel === 2) {
+      waiverRow.classList.add('visible');
+    } else {
+      waiverRow.classList.remove('visible');
+    }
+  });
+});
+// init
+document.getElementById('program-row').style.display = 'none';
+
+// ────────────────────────────────────────────────────────────────────────────
+// Sample buttons
+// ────────────────────────────────────────────────────────────────────────────
+document.querySelectorAll('.btn-sample').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const key = btn.dataset.sample;
+    if (SAMPLES[key]) {
+      document.getElementById('transcript-input').value = SAMPLES[key];
+    }
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// The FastAPI backend replaces Claude logic completely
+// ────────────────────────────────────────────────────────────────────────────
+const API_BASE = 'http://localhost:8000';
+
+async function uploadPdf(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  const btn = document.getElementById('run-btn');
+  const badge = document.getElementById('status-badge');
+  badge.className = 'badge running';
+  badge.textContent = 'EXTRACTING...';
+  btn.disabled = true;
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const res = await fetch(`${API_BASE}/audit/extract`, {
+      method: 'POST',
+      body: formData
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || 'Failed to extract');
+    const data = await res.json();
+    document.getElementById('transcript-input').value = data.csv_text;
+    badge.className = 'badge eligible';
+    badge.textContent = 'EXTRACTED';
+  } catch (e) {
+    alert('Extraction Error: ' + e.message);
+    badge.className = 'badge ineligible';
+    badge.textContent = 'ERROR';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+
+
+// ────────────────────────────────────────────────────────────────────────────
+// Main audit runner
+// ────────────────────────────────────────────────────────────────────────────
+async function runAudit() {
+  const transcript = document.getElementById('transcript-input').value.trim();
+  if (!transcript) { alert('Please paste a transcript CSV first.'); return; }
+
+  const program = document.getElementById('program-select').value;
+  const waivers = document.getElementById('waivers-input').value.trim();
+  const btn = document.getElementById('run-btn');
+  const badge = document.getElementById('status-badge');
+  const body = document.getElementById('result-body');
+
+  btn.disabled = true;
+  badge.className = 'badge running';
+  badge.textContent = 'RUNNING';
+  body.innerHTML = `<div class="loader"><div class="spinner"></div>Auditing transcript…</div>`;
+
+  try {
+    const res = await fetch(`${API_BASE}/audit/run_csv`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        csv_text: transcript,
+        program: program
+      })
+    });
+
+    if (!res.ok) {
+      throw new Error((await res.json()).detail || 'API Error');
+    }
+
+    const result = await res.json();
+    result.requested_level = currentLevel; // Pass down the tab requested
+
+    renderResult(result, program);
+    const eligible = result.graduation_status === 'PASS';
+    
+    if (currentLevel === 3) {
+      badge.className = `badge ${eligible ? 'eligible' : 'ineligible'}`;
+      badge.textContent = eligible ? 'ELIGIBLE' : 'NOT ELIGIBLE';
+    } else {
+      badge.className = 'badge eligible';
+      badge.textContent = `L${currentLevel} DONE`;
+    }
+  } catch (e) {
+    badge.className = 'badge ineligible';
+    badge.textContent = 'ERROR';
+    body.innerHTML = `<div class="empty-state" style="color:var(--danger)">
+      <p>⚠ Failed to run audit via backend.<br/>${e.message}</p></div>`;
+    console.error(e);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Render
+// ────────────────────────────────────────────────────────────────────────────
+function renderResult(data, program) {
+  const body = document.getElementById('result-body');
+  if (data.requested_level === 1) body.innerHTML = renderL1(data);
+  else if (data.requested_level === 2) body.innerHTML = renderL2(data);
+  else body.innerHTML = renderL3(data);
+}
+
+function renderL1(d) {
+  const l1 = d.l1;
+  return `
+    <div class="metrics">
+      <div class="metric-card">
+        <span class="label">Total Earned</span>
+        <div class="value blue">${l1.total_credits}</div>
+        <div class="sub">credits</div>
+      </div>
+      <div class="metric-card">
+        <span class="label">Passed Courses</span>
+        <div class="value green">${l1.passed_courses.length}</div>
+        <div class="sub">courses</div>
+      </div>
+    </div>
+    
+    <div class="section-head">Passed Courses</div>
+    <div style="display:flex;flex-wrap:wrap;gap:4px;padding:10px 0;">
+      ${l1.passed_courses.map(c => `<span class="elec-chip" style="border-color:var(--accent);color:var(--accent)">✓ ${c}</span>`).join('')}
+    </div>
+  `;
+}
+
+function renderL2(d) {
+  const cgpa = d.l2.cgpa;
+  const isGood = cgpa >= 2.0;
+
+  return `
+    <div class="metrics">
+      <div class="metric-card">
+        <span class="label">Final CGPA</span>
+        <div class="value ${isGood ? 'green' : 'red'}">${cgpa.toFixed(2)}</div>
+        <div class="sub">truncated floor</div>
+      </div>
+      <div class="metric-card">
+        <span class="label">Status</span>
+        <div class="value ${isGood ? 'green' : 'red'}" style="font-size:14px">${isGood ? 'Good' : 'Probation'}</div>
+        <div class="sub">standing</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderL3(d) {
+  const l3 = d.l3;
+  const eligible = d.graduation_status === 'PASS';
+  const credClass = l3.total_earned >= 120 ? 'green' : 'red'; // simplistic fallback
+  const cgpaClass = l3.cgpa >= 2.0 ? 'green' : 'red';
+
+  const catNames = { GED:'General Education', Math:'Core Math', Core:'Major Core', Science:'Core Science', Business:'Core Business' };
+  const hasMissing = Object.values(l3.missing || {}).some(arr => arr.length > 0);
+
+  const missingHtml = hasMissing ? Object.entries(l3.missing || {}).filter(([,v])=>v.length).map(([cat, courses]) => `
+    <div class="missing-group">
+      <div class="missing-group-head">
+        ${catNames[cat] || cat}
+        <span class="count-badge">${courses.length}</span>
+      </div>
+      <div class="missing-list">
+        ${courses.map(c => `<div class="missing-item">${c}</div>`).join('')}
+      </div>
+    </div>`).join('') : `<div style="color:var(--accent);font-family:var(--mono);font-size:12px;padding:8px 0">✓ All subject requirements satisfied.</div>`;
+
+  const electives = l3.free_electives || [];
+  const invalids = l3.invalid_electives || [];
+  const advisories = l3.advisories || [];
+
+  return `
+    <div class="verdict ${eligible ? 'eligible' : 'ineligible'}">
+      <span style="font-size:18px">${eligible ? '✓' : '✗'}</span>
+      ${eligible ? 'ELIGIBLE FOR GRADUATION' : 'NOT ELIGIBLE FOR GRADUATION'}
+      <span style="margin-left:auto;font-size:10px;color:inherit;opacity:0.7">${d.program || ''}</span>
+    </div>
+
+    <div class="metrics">
+      <div class="metric-card">
+        <span class="label">Credits</span>
+        <div class="value ${credClass}">${l3.total_earned} <span style="font-size:12px;color:var(--text3)"></span></div>
+        <div class="sub">earned credits</div>
+      </div>
+      <div class="metric-card">
+        <span class="label">CGPA</span>
+        <div class="value ${cgpaClass}">${l3.cgpa.toFixed(2)}</div>
+        <div class="sub">computed</div>
+      </div>
+      <div class="metric-card">
+        <span class="label">Missing Req.</span>
+        <div class="value ${hasMissing ? 'red' : 'green'}">${Object.values(l3.missing||{}).flat().length}</div>
+        <div class="sub">required courses</div>
+      </div>
+      <div class="metric-card">
+        <span class="label">Advisories</span>
+        <div class="value ${advisories.length > 0 ? 'yellow' : ''}">${advisories.length}</div>
+        <div class="sub">warnings</div>
+      </div>
+    </div>
+
+    ${hasMissing ? `<div class="section-head">Missing Requirements</div>${missingHtml}` : ''}
+
+    ${invalids.length ? `
+      <div class="section-head">Invalid Electives</div>
+      <div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px">
+        ${invalids.map(c => `<span class="elec-chip invalid">⊘ ${c}</span>`).join('')}
+      </div>
+    ` : ''}
+
+    ${advisories.length ? `
+      <div class="section-head">Advisory Notes</div>
+      ${advisories.map(a => `<div class="advisory-card"><span class="icon">⚠</span>${a}</div>`).join('')}
+    ` : ''}
+
+    ${electives.length ? `
+      <div class="section-head">Free Electives Used</div>
+      <div style="display:flex;flex-wrap:wrap;margin-bottom:8px">
+        ${electives.map(e => `<span class="elec-chip ${l3.excess_electives?.includes(e) ? 'excess' : ''}">${e[0]} <span class="cr">${e[1]}cr</span></span>`).join('')}
+      </div>
+    ` : ''}
+  `;
+}
+</script>
+</body>
+</html>
