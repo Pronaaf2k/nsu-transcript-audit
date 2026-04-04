@@ -37,23 +37,21 @@ from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-try:
-    import pytesseract
-    from PIL import Image
-    TESSERACT_OK = True
-except ImportError:
-    TESSERACT_OK = False
+
 
 # ── Path setup ────────────────────────────────────────────────────────────────
-# Now importing from packages.core
-import packages.core.audit_l1 as audit_l1
-import packages.core.audit_l2 as audit_l2
-import packages.core.audit_l3 as audit_l3
-import packages.core.style as style
+ROOT_DIR = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(ROOT_DIR))
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv(ROOT_DIR / ".env")
+except ImportError:
+    pass
 
 AUDIT_SRC = Path(__file__).parent.parent / "core"
 
-# ── Security ──────────────────────────────────────────────────────────────────
+# ── Security ───────────────────────────────────────────────────────────────────
 API_KEY = os.environ.get("AUDIT_API_KEY", "")
 
 
@@ -75,11 +73,20 @@ app.add_middleware(
 )
 
 # Register batch router (ZIP uploads, async job queue)
-from packages.api.batch import router as batch_router  # noqa: E402
-app.include_router(batch_router)
+try:
+    from packages.api.batch import router as batch_router  # noqa: E402
+    app.include_router(batch_router)
+except ImportError as e:
+    print(f"Warning: Batch router not available: {e}")
 
-# Import supabase client
-from packages.api.supabase_client import save_transcript_and_audit
+# Import storage modules (local SQLite + optional Supabase)
+from packages.api.local_storage import save_audit, get_audit, get_audit_history, delete_audit
+
+try:
+    from packages.api.supabase_client import save_transcript_and_audit
+except ImportError:
+    def save_transcript_and_audit(*args, **kwargs):
+        pass  # Supabase not configured
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -101,189 +108,96 @@ def _courses_to_csv(courses: list[dict[str, Any]]) -> str:
     return buf.getvalue()
 
 
-def _run_audit(csv_text: str, program: str) -> dict[str, Any]:
-    """Write csv_text to a temp file, run all three audit levels, return results."""
-    import importlib
+def _run_audit(csv_text: str, program: str, concentration: str | None = None) -> dict[str, Any]:
+    """Parse csv_text, run the Unified Auditor from GradTrace, return legacy + new results."""
+    from packages.core.unified import UnifiedAuditor
 
-    program_md = str(AUDIT_SRC / "program.md")
+    reader = csv.DictReader(io.StringIO(csv_text))
+    # clean fieldnames
+    reader.fieldnames = [n.strip() for n in (reader.fieldnames or [])]
+    
+    rows = []
+    for r in reader:
+        rows.append({
+            "course_code": r.get("Course_Code", "").strip(),
+            "course_name": r.get("Course_Name", "").strip(),
+            "credits": r.get("Credits", "0").strip(),
+            "grade": r.get("Grade", "").strip(),
+            "semester": r.get("Semester", "").strip(),
+            "section": ""
+        })
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False, encoding="utf-8") as f:
-        f.write(csv_text)
-        tmp_path = f.name
+    result = UnifiedAuditor.run_from_rows(rows, program, concentration)
 
-    try:
-        # ── L1: credit tally ──────────────────────────────────────────
-        passed_courses, total_credits, rows_display = _l1_data(audit_l1, tmp_path)
+    eligible = result.get("level_3", {}).get("eligible", False) if result.get("level_3") else False
+    deficiencies = result.get("level_3", {}).get("reasons", []) if result.get("level_3") else []
+    total_cr = result.get("level_1", {}).get("credits_earned", 0) if result.get("level_1") else 0
+    cgpa = result.get("level_2", {}).get("cgpa", 0.0) if result.get("level_2") else 0.0
 
-        # ── L2: CGPA ──────────────────────────────────────────────────
-        cgpa, waiver = _l2_data(audit_l2, tmp_path)
-
-        # ── L3: full deficiency audit ─────────────────────────────────
-        requirements = audit_l3.parse_program_knowledge(program_md, program)
-        audit_result = audit_l3.audit_student(tmp_path, requirements, md_file=program_md)
-
-        passed = (
-            audit_result.get("graduation_eligible", False)
-            if isinstance(audit_result, dict)
-            else False
-        )
-
-        result = {
+    legacy = {
+        "audit_result": {
             "l1": {
-                "total_credits": total_credits,
-                "passed_courses": list(passed_courses),
+                "total_credits": total_cr,
+                "passed_courses": [],
             },
             "l2": {
-                "cgpa":   round(cgpa, 2),
-                "waiver": waiver,
+                "cgpa": cgpa,
+                "waiver": False,
             },
-            "l3": audit_result,
-            "program":           program,
-            "total_credits":     total_credits,
-            "cgpa":              round(cgpa, 2),
-            "graduation_status": "PASS" if passed else "FAIL",
-        }
-        
-        # Save to PostgreSQL
-        save_transcript_and_audit(csv_text, program, 3, result)
-        
-        return result
-    finally:
-        os.unlink(tmp_path)
-
-
-def _l1_data(audit_l1, csv_path: str):
-    """Extract structured data from audit_l1 without printing."""
-    passed_courses: set[str] = set()
-    total_credits = 0.0
-
-    GRADE_POINTS = {
-        "A": 4.0, "A-": 3.7, "B+": 3.3, "B": 3.0, "B-": 2.7,
-        "C+": 2.3, "C": 2.0, "C-": 1.7, "D+": 1.3, "D": 1.0, "F": 0.0,
+            "l3": {
+                "graduation_eligible": eligible,
+                "deficiencies": deficiencies,
+            },
+            "graduation_status": "PASS" if eligible else "FAIL",
+            "gradtrace": result
+        },
+        "program": program,
+        "total_credits": total_cr,
+        "cgpa": cgpa,
+        "graduation_status": "PASS" if eligible else "FAIL",
     }
-    passed_best: dict[str, float] = {}
-    rows_display = []
-
-    with open(csv_path, mode="r") as infile:
-        reader = csv.DictReader(infile)
-        reader.fieldnames = [n.strip() for n in (reader.fieldnames or [])]
-        for row in reader:
-            course  = row["Course_Code"].strip()
-            grade   = row["Grade"].strip()
-            try:    credits = float(row["Credits"])
-            except: credits = 0.0
-
-            pts = GRADE_POINTS.get(grade)
-
-            if audit_l1.is_passing_grade(grade):
-                if course not in passed_best:
-                    total_credits += credits
-                    passed_best[course] = pts if pts is not None else 0.0
-                    passed_courses.add(course)
-                    rows_display.append((course, credits, grade, "Counted"))
-                else:
-                    rows_display.append((course, credits, grade, "Retake (Ignored)"))
-                    if pts is not None and pts > passed_best[course]:
-                        passed_best[course] = pts
-            else:
-                rows_display.append((course, credits, grade, "Failed"))
-
-    return passed_courses, total_credits, rows_display
-
-
-def _l2_data(audit_l2, csv_path: str):
-    """Extract CGPA from audit_l2 without printing."""
-    # audit_l2.calculate_cgpa returns (cgpa, waiver_applied) or writes to stdout
-    # We call the internal logic directly
-    GRADE_POINTS = {
-        "A": 4.0, "A-": 3.7, "B+": 3.3, "B": 3.0, "B-": 2.7,
-        "C+": 2.3, "C": 2.0, "C-": 1.7, "D+": 1.3, "D": 1.0, "F": 0.0,
-    }
-    best: dict[str, tuple[float, float]] = {}  # course -> (pts, credits)
-
-    with open(csv_path, mode="r") as infile:
-        reader = csv.DictReader(infile)
-        reader.fieldnames = [n.strip() for n in (reader.fieldnames or [])]
-        for row in reader:
-            course  = row["Course_Code"].strip()
-            grade   = row["Grade"].strip()
-            try:    credits = float(row["Credits"])
-            except: credits = 0.0
-            pts = GRADE_POINTS.get(grade, 0.0)
-            if grade.upper() not in ("W", "I", "X"):
-                if course not in best or pts > best[course][0]:
-                    best[course] = (pts, credits)
-
-    total_pts = sum(p * c for p, c in best.values())
-    total_cr  = sum(c for _, c in best.values())
-    cgpa = total_pts / total_cr if total_cr else 0.0
-    return round(cgpa, 2), False
+    
+    # Save to PostgreSQL (optional - only if Supabase is configured)
+    try:
+        save_transcript_and_audit(csv_text, program, 3, legacy)
+    except Exception:
+        pass  # Supabase not configured, continue without saving
+    
+    # Save to local SQLite database (always works)
+    try:
+        audit_id = save_audit(csv_text, program, legacy, source_type="csv")
+        legacy["id"] = audit_id
+    except Exception as e:
+        print(f"Warning: Failed to save locally: {e}")
+    
+    return legacy
 
 
 # ── OCR helpers ───────────────────────────────────────────────────────────────
 
-def _ocr_bytes_to_csv(file_bytes: bytes, filename: str) -> tuple[str, str]:
-    """
-    Run Tesseract on image/PDF bytes.
-    Returns (csv_text, raw_ocr_text).
-    Raises RuntimeError if Tesseract is not installed.
-    """
-    if not TESSERACT_OK:
-        raise RuntimeError("Tesseract not installed on this server.")
-
-    import re
-    ext = Path(filename).suffix.lower()
-
-    # ── Extract raw text ──────────────────────────────────────────────────────
-    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as f:
-        f.write(file_bytes)
-        tmp_img = f.name
-
-    try:
-        if ext == ".pdf":
-            from pdf2image import convert_from_path
-            pages = convert_from_path(tmp_img, dpi=200)
-            raw = "\n".join(
-                pytesseract.image_to_string(p, config="--psm 6") for p in pages
-            )
-        else:
-            img = Image.open(tmp_img)
-            raw = pytesseract.image_to_string(img, config="--psm 6")
-    finally:
-        os.unlink(tmp_img)
-
-    # ── Parse raw text → CSV rows ──────────────────────────────────────────────
-    # Matches lines like: CSE115  3.0  A  Fall2022  (attempt is inferred)
-    pattern = re.compile(
-        r"(?P<code>[A-Z]{2,4}\d{3}[A-Z]?)"
-        r"\s+(?P<credits>\d+\.?\d*)"
-        r"\s+(?P<grade>[A-DF][+-]?|W|I)"
-        r"(?:\s+(?P<semester>(?:Spring|Summer|Fall)\s*\d{4}))?",
-        re.IGNORECASE,
-    )
-    attempt_counter: dict[str, int] = {}
-    rows = []
-    for line in raw.splitlines():
-        m = pattern.search(line)
-        if m:
-            code = m.group("code").upper()
-            attempt_counter[code] = attempt_counter.get(code, 0) + 1
-            rows.append({
-                "Course_Code": code,
-                "Credits":     m.group("credits"),
-                "Grade":       m.group("grade").upper(),
-                "Semester":    (m.group("semester") or "").replace(" ", ""),
-                "Attempt":     attempt_counter[code],
-            })
-
+def _parse_bytes_with_gemini(file_bytes: bytes, filename: str) -> str:
+    from packages.core.pdf_parser import VisionParser
+    import os, csv, io
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY environment variable missing!")
+    
+    rows = VisionParser.parse(file_bytes, api_key, filename=filename)
     if not rows:
-        return "", raw
-
+        return ""
+        
     buf = io.StringIO()
-    w = csv.DictWriter(buf, fieldnames=["Course_Code", "Credits", "Grade", "Semester", "Attempt"])
+    w = csv.DictWriter(buf, fieldnames=["Course_Code", "Course_Name", "Credits", "Grade", "Semester"])
     w.writeheader()
-    w.writerows(rows)
-    return buf.getvalue(), raw
+    for r in rows:
+        w.writerow({
+            "Course_Code": r.get("course_code", ""),
+            "Course_Name": r.get("course_name", ""),
+            "Credits": str(r.get("credits", "")),
+            "Grade": r.get("grade", ""),
+            "Semester": r.get("semester", "")
+        })
+    return buf.getvalue()
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -315,13 +229,13 @@ async def audit_extract(
     _check_key(authorization)
     file_bytes = await file.read()
     try:
-        csv_text, raw_ocr = _ocr_bytes_to_csv(file_bytes, file.filename or "transcript.pdf")
+        csv_text = _parse_bytes_with_gemini(file_bytes, file.filename or "transcript.pdf")
         if not csv_text:
             raise HTTPException(
                 status_code=422,
-                detail="Tesseract could not extract any course data from this file."
+                detail="Gemini LLM could not extract any course data from this file."
             )
-        return {"csv_text": csv_text, "raw_ocr": raw_ocr}
+        return {"csv_text": csv_text, "raw_ocr": "Parsed by Gemini 2.5 Flash"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -385,16 +299,75 @@ async def audit_image(
     _check_key(authorization)
     file_bytes = await file.read()
     try:
-        csv_text, raw_ocr = _ocr_bytes_to_csv(file_bytes, file.filename or "transcript.pdf")
+        csv_text = _parse_bytes_with_gemini(file_bytes, file.filename or "transcript.pdf")
         if not csv_text:
             raise HTTPException(
                 status_code=422,
-                detail="Tesseract could not extract any course data from this file. "
-                       "Ensure the image is clear and right-side up.",
+                detail="Gemini LLM could not extract any course data from this file. "
+                       "Ensure the image is a valid academic transcript.",
             )
         result = _run_audit(csv_text, program)
-        result["raw_ocr"] = raw_ocr   # include for debugging
+        result["raw_ocr"] = "Parsed natively using Gemini 2.5 Flash."
         return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── History Endpoints ────────────────────────────────────────────────────────────
+
+@app.get("/history")
+def get_history(
+    limit: int = 20,
+    program: str | None = None,
+    authorization: str | None = Header(default=None),
+):
+    """
+    Get audit history.
+    GET /history?limit=20&program=CSE
+    """
+    _check_key(authorization)
+    try:
+        return get_audit_history(limit=limit, program=program)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/history/{audit_id}")
+def get_audit_by_id(
+    audit_id: str,
+    authorization: str | None = Header(default=None),
+):
+    """
+    Get a specific audit by ID.
+    """
+    _check_key(authorization)
+    try:
+        result = get_audit(audit_id)
+        if not result:
+            raise HTTPException(status_code=404, detail="Audit not found")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/history/{audit_id}")
+def delete_audit_by_id(
+    audit_id: str,
+    authorization: str | None = Header(default=None),
+):
+    """
+    Delete a specific audit by ID.
+    """
+    _check_key(authorization)
+    try:
+        deleted = delete_audit(audit_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Audit not found")
+        return {"deleted": True, "id": audit_id}
     except HTTPException:
         raise
     except Exception as e:

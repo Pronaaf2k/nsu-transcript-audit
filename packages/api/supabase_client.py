@@ -1,24 +1,25 @@
 import os
 from dotenv import load_dotenv
 
+load_dotenv()
+
+HAS_SUPABASE = False
+supabase = None
+Client = None
+
 try:
     from supabase import create_client, Client
     HAS_SUPABASE = True
-except ImportError:
-    HAS_SUPABASE = False
-    Client = type('MockClient', (), {})
-
-load_dotenv()
-
-SUPABASE_URL = os.environ.get("SUPABASE_URL", os.environ.get("NEXT_PUBLIC_SUPABASE_URL", ""))
-SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", os.environ.get("SUPABASE_ANON_KEY", ""))
-
-supabase: Client | None = None
-if HAS_SUPABASE and SUPABASE_URL and SUPABASE_KEY:
-    try:
+    
+    SUPABASE_URL = os.environ.get("SUPABASE_URL", os.environ.get("NEXT_PUBLIC_SUPABASE_URL", ""))
+    SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", os.environ.get("SUPABASE_ANON_KEY", ""))
+    
+    if SUPABASE_URL and SUPABASE_KEY:
         supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-    except Exception as e:
-        print(f"Warning: Failed to init Supabase client: {e}")
+except ImportError:
+    print("Supabase not installed. Database saving disabled.")
+except Exception as e:
+    print(f"Warning: Failed to init Supabase client: {e}")
 
 def save_transcript_and_audit(csv_text: str, program: str, level: int, audit_result: dict, student_id: str | None = None):
     if not supabase:

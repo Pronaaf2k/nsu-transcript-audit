@@ -1,10 +1,30 @@
 """
-audit_engine — shared NSU graduation audit package.
-Wraps audit_l1.py / audit_l2.py / audit_l3.py logic into
-importable functions usable by the Supabase Edge Function runner,
-the CLI, and tests.
-"""
-from .parser import parse_csv_transcript
-from .runner import run_audit
+GradeTrace Core — Academic Transcript Audit Engine
 
-__all__ = ["parse_csv_transcript", "run_audit"]
+Classes:
+    CourseRecord       — single course attempt data model
+    CourseCatalog      — NSU course database + prerequisites
+    TranscriptParser   — CSV transcript parser
+    CreditAuditor      — Level 1: credit tallying
+    CGPAAuditor        — Level 2: CGPA + standing
+    GraduationAuditor  — Level 3: graduation eligibility
+    UnifiedAuditor     — combined pipeline + roadmap
+"""
+
+from packages.core.models import CourseRecord
+from packages.core.course_catalog import CourseCatalog
+from packages.core.transcript_parser import TranscriptParser
+from packages.core.credit_engine import CreditAuditor
+from packages.core.cgpa_engine import CGPAAuditor
+from packages.core.audit_engine import GraduationAuditor
+from packages.core.unified import UnifiedAuditor
+
+__all__ = [
+    "CourseRecord",
+    "CourseCatalog",
+    "TranscriptParser",
+    "CreditAuditor",
+    "CGPAAuditor",
+    "GraduationAuditor",
+    "UnifiedAuditor",
+]

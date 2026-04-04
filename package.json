@@ -5,7 +5,7 @@
   "description": "GradeTrace — Academic transcript auditing platform for NSU",
   "scripts": {
     "dev:web": "pnpm --filter web dev",
-    "dev:api": "cd packages/api && uvicorn main:app --reload --port 8000",
+    "dev:api": "cd packages/api && .\\.venv\\Scripts\\python -m uvicorn main:app --reload --port 8000",
     "dev:mobile": "pnpm --filter mobile start",
     "build:web": "pnpm --filter web build",
     "start:web": "pnpm --filter web start",

@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "nsu-audit": {
+      "command": "python",
+      "args": ["F:/Github/nsu-transcript-audit/packages/api/mcp_server.py"],
+      "env": {
+        "PYTHONPATH": "F:/Github/nsu-transcript-audit"
+      }
+    }
+  }
+}

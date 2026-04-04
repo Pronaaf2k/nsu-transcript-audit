@@ -1,0 +1,36 @@
+Course_Code,Course_Name,Credits,Grade,Semester
+CSE115,Programming Language I,3,A,Spring2019
+CSE115L,Programming Language I Lab,1,A,Spring2019
+MAT120,Calculus I,3,B+,Spring2019
+ENG102,Introduction to Composition,3,A,Spring2019
+CSE215,Programming Language II,3,B,Summer2019
+CSE215L,Programming Language II Lab,1,B+,Summer2019
+MAT130,Calculus II,3,B,Fall2019
+CSE225,Data Structures and Algorithms,3,A-,Fall2019
+CSE225L,Data Structures and Algorithms Lab,0,A,Fall2019
+MAT250,Calculus III,3,B+,Fall2019
+CSE173,Discrete Mathematics,3,A,Spring2020
+CSE231,Digital Logic Design,3,B+,Spring2020
+CSE231L,Digital Logic Design Lab,0,A,Spring2020
+MAT350,Engineering Mathematics,3,B,Spring2020
+CSE299,Junior Design Project,1,A,Summer2020
+CSE311,Database Management Systems,3,A-,Fall2020
+CSE311L,Database Management Systems Lab,0,B+,Fall2020
+CSE323,Operating Systems Design,3,B,Fall2020
+CSE325,Operating Systems,3,B+,Fall2020
+CSE327,Software Engineering,3,A,Spring2021
+EEE141,Electrical Circuits I,3,B,Spring2021
+EEE141L,Electrical Circuits I Lab,1,A-,Spring2021
+CSE331,Microprocessor Interfacing and Embedded Systems,3,B+,Summer2021
+CSE331L,Microprocessor Interfacing and Embedded Systems Lab,0,A,Summer2021
+CSE332,Computer Organization and Architecture,3,B,Fall2021
+CSE373,Design and Analysis of Algorithms,3,A-,Fall2021
+ENG103,Intermediate Composition,3,A,Spring2019
+ENG105,Advanced Composition,3,A-,Fall2019
+HIS103,Emergence of Bangladesh,3,A,Summer2019
+PHI101,Introduction to Philosophy,3,B+,Fall2019
+BEN205,Bengali Language and Literature,3,A,Fall2019
+POL101,Introduction to Political Science,3,B,Spring2020
+ECO101,Introduction to Microeconomics,3,A-,Summer2020
+SOC101,Introduction to Sociology,3,A,Fall2020
+ENV203,Introduction to Geography and Environment,3,A-,Spring2021

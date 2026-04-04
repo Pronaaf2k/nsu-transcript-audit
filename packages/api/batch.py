@@ -38,29 +38,42 @@ router = APIRouter(prefix="/batch", tags=["batch"])
 # ── OCR helpers ───────────────────────────────────────────────────────────────
 
 def _ocr_image_file(path: str) -> str:
-    """Run Tesseract on a single image or PDF page. Returns raw text."""
-    import pytesseract
-    from PIL import Image
-
-    ext = Path(path).suffix.lower()
-    if ext == ".pdf":
-        from pdf2image import convert_from_path
-        pages = convert_from_path(path, dpi=200)
-        return "\n".join(pytesseract.image_to_string(p, config="--psm 6") for p in pages)
-    else:
-        img = Image.open(path)
-        return pytesseract.image_to_string(img, config="--psm 6")
+    """Use Gemini to OCR a single image or PDF page. Returns CSV text."""
+    import os
+    from packages.core.pdf_parser import VisionParser
+    
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY environment variable is required for OCR")
+    
+    with open(path, "rb") as f:
+        file_bytes = f.read()
+    
+    rows = VisionParser.parse(file_bytes, api_key, filename=path)
+    
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=["Course_Code", "Course_Name", "Credits", "Grade", "Semester"])
+    w.writeheader()
+    for r in rows:
+        w.writerow({
+            "Course_Code": r.get("course_code", ""),
+            "Course_Name": r.get("course_name", ""),
+            "Credits": str(r.get("credits", "")),
+            "Grade": r.get("grade", ""),
+            "Semester": r.get("semester", "")
+        })
+    return buf.getvalue()
 
 
 def _ocr_text_to_csv(raw_text: str) -> str:
     """
-    Best-effort convert Tesseract raw text to the audit CSV format.
+    Fallback: Best-effort convert raw text to the audit CSV format.
     Looks for lines that look like: COURSEXX  3.0  A  Fall2022
     """
     import re
+
     lines = raw_text.splitlines()
     rows = []
-    # Pattern: course code, credits, grade, optional semester
     pattern = re.compile(
         r"(?P<code>[A-Z]{2,4}\d{3}[A-Z]?)"
         r"\s+(?P<credits>\d+\.?\d*)"
