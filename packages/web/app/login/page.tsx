@@ -1,6 +1,7 @@
 'use client'
 
 import { createClient } from '@/lib/supabase/client'
+import WakeButton from '@/components/WakeButton'
 
 export default function LoginPage() {
     const supabase = createClient()
@@ -27,6 +28,9 @@ export default function LoginPage() {
                     </svg>
                     Continue with Google
                 </button>
+                <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'center' }}>
+                    <WakeButton />
+                </div>
             </div>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
                 NSU Transcript Audit · North South University
