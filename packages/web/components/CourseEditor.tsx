@@ -19,7 +19,7 @@ interface ParsedCourse {
     grade: string
     semester: string
     gradePoints: number
-    status: string
+    status?: string
     verified?: boolean
 }
 
