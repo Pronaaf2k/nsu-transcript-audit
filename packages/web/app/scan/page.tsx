@@ -4,6 +4,8 @@ import { useState, useRef } from 'react'
 import Nav from '@/components/Nav'
 import Footer from '@/components/Footer'
 import AuditReport from '@/components/AuditReport'
+import CourseEditor from '@/components/CourseEditor'
+import { createClient } from '@/lib/supabase/client'
 
 const PROGRAMS = [
   { code: 'CSE', name: 'Computer Science & Engineering (CSE)' },
@@ -21,22 +23,31 @@ const GRADE_POINTS: Record<string, number> = {
   'C+': 2.3, 'C': 2.0, 'C-': 1.7, 'D+': 1.3, 'D': 1.0, 'F': 0.0
 }
 
-interface CourseRow {
-  Course_Code: string; Course_Name: string
-  Credits: string; Grade: string; Semester: string
+interface ParsedCourse {
+  course: string
+  courseName: string
+  credits: number
+  grade: string
+  semester: string
+  gradePoints: number
 }
 
-function parseCSV(csvText: string): CourseRow[] {
+function parseCSVToCourses(csvText: string): ParsedCourse[] {
   const lines = csvText.trim().split('\n')
-  const rows: CourseRow[] = []
+  const rows: ParsedCourse[] = []
   for (const line of lines) {
     const trimmed = line.trim()
     if (!trimmed || trimmed.toLowerCase().includes('course_code')) continue
     const parts = trimmed.split(',').map(p => p.trim())
-    if (parts.length >= 4) {
+    if (parts.length >= 5) {
+      const grade = parts[3]?.toUpperCase() || ''
       rows.push({
-        Course_Code: parts[0] || '', Course_Name: parts[1] || '',
-        Credits: parts[2] || '3', Grade: parts[3] || '', Semester: parts[4] || ''
+        course: parts[0] || '',
+        courseName: parts[1] || '',
+        credits: parseFloat(parts[2]) || 3,
+        grade: grade,
+        semester: parts[4] || 'Unknown',
+        gradePoints: GRADE_POINTS[grade] ?? 0
       })
     }
   }
@@ -44,14 +55,14 @@ function parseCSV(csvText: string): CourseRow[] {
 }
 
 function runLocalAudit(csvText: string, program: string) {
-  const courses = parseCSV(csvText)
+  const courses = parseCSVToCourses(csvText)
   if (courses.length === 0) throw new Error('No valid course data found')
   const passedBest: Record<string, number> = {}
   let totalCredits = 0
   for (const row of courses) {
-    const course = row.Course_Code.toUpperCase()
-    const grade = row.Grade.toUpperCase()
-    const credits = parseFloat(row.Credits) || 0
+    const course = row.course.toUpperCase()
+    const grade = row.grade.toUpperCase()
+    const credits = row.credits
     const pts = GRADE_POINTS[grade]
     const isPassing = !['F', 'W', 'I', 'X'].includes(grade)
     if (isPassing && !(course in passedBest)) {
@@ -65,6 +76,7 @@ function runLocalAudit(csvText: string, program: string) {
     ? Object.values(passedBest).reduce((a, b) => a + b, 0) / Object.values(passedBest).length : 0
   const roundedCgpa = Math.round(cgpa * 100) / 100
   return {
+    program,
     level1: { totalCredits, rows: [] },
     level2: { cgpa: roundedCgpa, gpaCredits: totalCredits, standing: cgpa >= 2.0 ? 'NORMAL' : 'PROBATION' },
     level3: { eligible: cgpa >= 2.0 && totalCredits >= 120, totalEarned: totalCredits, cgpa: roundedCgpa, totalRequired: 120, minCGPA: 2.0, missing: {}, advisories: [] },
@@ -74,9 +86,10 @@ function runLocalAudit(csvText: string, program: string) {
 }
 
 type Mode = 'csv' | 'ocr'
-type OcrStep = 'idle' | 'extracting' | 'review' | 'auditing' | 'done'
+type OcrStep = 'idle' | 'extracting' | 'review' | 'editing' | 'auditing' | 'done'
 
 export default function ScanPage() {
+  const supabase = createClient()
   const csvInputRef = useRef<HTMLInputElement>(null)
   const ocrInputRef = useRef<HTMLInputElement>(null)
   const [program, setProgram] = useState('')
@@ -92,8 +105,57 @@ export default function ScanPage() {
   const [ocrStep, setOcrStep] = useState<OcrStep>('idle')
   const [ocrError, setOcrError] = useState<string | null>(null)
   const [extractedCsv, setExtractedCsv] = useState('')
+  const [extractedCourses, setExtractedCourses] = useState<ParsedCourse[]>([])
   const [ocrResult, setOcrResult] = useState<Record<string, unknown> | null>(null)
   const [ocrFile, setOcrFile] = useState<File | null>(null)
+
+  // ── Save to Supabase ──────────────────────────────────────────────────
+  async function saveToSupabase(courses: ParsedCourse[], csvText: string, auditResult: Record<string, unknown>) {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) return
+
+      // Save to transcript_scans
+      const { data: scan, error: scanError } = await supabase
+        .from('transcript_scans')
+        .insert({
+          user_id: user.id,
+          source_type: 'csv',
+          program: program,
+          parsed_data: courses,
+          audit_result: auditResult,
+          total_credits: auditResult.total_credits,
+          cgpa: (auditResult.level2 as { cgpa?: number })?.cgpa || 0,
+          graduation_status: auditResult.graduation_status,
+          verification_status: 'verified',
+          total_courses: courses.length,
+          verified_courses: courses.filter(c => !['F', 'W', 'I', 'X'].includes(c.grade)).length
+        })
+        .select()
+        .single()
+
+      if (scanError) {
+        console.error('Error saving scan:', scanError)
+        return
+      }
+
+      // Save verified courses
+      const verifiedCourses = courses.map(c => ({
+        scan_id: scan.id,
+        course_code: c.course,
+        course_name: c.courseName,
+        credits: c.credits,
+        grade: c.grade,
+        semester: c.semester,
+        verified: true,
+        is_manual: false
+      }))
+
+      await supabase.from('verified_courses').insert(verifiedCourses)
+    } catch (err) {
+      console.error('Error saving to Supabase:', err)
+    }
+  }
 
   // ── CSV mode ──────────────────────────────────────────────────────────────
   async function handleCsvUpload(file: File) {
@@ -102,7 +164,12 @@ export default function ScanPage() {
     try {
       const text = await file.text()
       setCsvText(text)
-      setCsvResult(runLocalAudit(text, program))
+      const result = runLocalAudit(text, program)
+      setCsvResult(result)
+      
+      // Save to Supabase
+      const courses = parseCSVToCourses(text)
+      await saveToSupabase(courses, text, result)
     } catch (e: unknown) {
       setCsvError(e instanceof Error ? e.message : String(e))
     } finally { setCsvLoading(false) }
@@ -112,7 +179,7 @@ export default function ScanPage() {
   async function handleOcrUpload(file: File) {
     if (!program) { setOcrError('Please select your program first'); return }
     setOcrFile(file); setOcrError(null); setOcrStep('extracting')
-    setExtractedCsv(''); setOcrResult(null)
+    setExtractedCsv(''); setOcrResult(null); setExtractedCourses([])
 
     const apiUrl = process.env.NEXT_PUBLIC_API_URL
     if (!apiUrl) {
@@ -133,12 +200,25 @@ export default function ScanPage() {
         throw new Error(err.detail || 'Extraction failed')
       }
       const data = await res.json()
-      setExtractedCsv(data.csv_text || '')
+      const csvText = data.csv_text || ''
+      setExtractedCsv(csvText)
+      const courses = parseCSVToCourses(csvText)
+      setExtractedCourses(courses)
       setOcrStep('review')
     } catch (e: unknown) {
       setOcrError(e instanceof Error ? e.message : String(e))
       setOcrStep('idle')
     }
+  }
+
+  function handleEditCourses() {
+    setOcrStep('editing')
+  }
+
+  async function handleSaveEditedCourses(courses: ParsedCourse[], csvText: string) {
+    setExtractedCourses(courses)
+    setExtractedCsv(csvText)
+    setOcrStep('review')
   }
 
   async function runOcrAudit() {
@@ -156,7 +236,12 @@ export default function ScanPage() {
         throw new Error(err.detail || 'Audit failed')
       }
       const data = await res.json()
-      setOcrResult(data); setOcrStep('done')
+      setOcrResult(data)
+      
+      // Save to Supabase
+      await saveToSupabase(extractedCourses, extractedCsv, data)
+      
+      setOcrStep('done')
     } catch (e: unknown) {
       setOcrError(e instanceof Error ? e.message : String(e))
       setOcrStep('review')
@@ -164,7 +249,7 @@ export default function ScanPage() {
   }
 
   function resetOcr() {
-    setOcrStep('idle'); setExtractedCsv(''); setOcrResult(null); setOcrError(null); setOcrFile(null)
+    setOcrStep('idle'); setExtractedCsv(''); setOcrResult(null); setOcrError(null); setOcrFile(null); setExtractedCourses([])
   }
 
   const tabStyle = (active: boolean): React.CSSProperties => ({
@@ -184,7 +269,6 @@ export default function ScanPage() {
         </div>
 
         <div className="card" style={{ marginBottom: '24px' }}>
-          {/* Program select */}
           <div className="form-group">
             <label style={{ fontWeight: 600, marginBottom: '8px', display: 'block' }}>
               1. Select Your Program <span style={{ color: 'var(--danger)' }}>*</span>
@@ -196,7 +280,6 @@ export default function ScanPage() {
             </select>
           </div>
 
-          {/* Mode toggle */}
           <div style={{ marginTop: '24px' }}>
             <label style={{ fontWeight: 600, marginBottom: '12px', display: 'block' }}>
               2. Choose Upload Method
@@ -264,7 +347,7 @@ export default function ScanPage() {
                       Gemini 2.5 Flash will extract courses — you can review before auditing
                     </p>
                     <p style={{ fontSize: '0.75rem', marginTop: '4px', color: 'var(--accent)', opacity: 0.8 }}>
-                      ⚡ Wake the backend first if it's been inactive
+                      ⚡ Wake the backend first if it has been inactive
                     </p>
                   </div>
                   <input ref={ocrInputRef} type="file" accept=".pdf,.png,.jpg,.jpeg,.webp"
@@ -287,7 +370,7 @@ export default function ScanPage() {
               {ocrStep === 'review' && (
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                    <p style={{ fontWeight: 700, color: 'var(--accent)' }}>✅ Extraction complete — review & edit before auditing</p>
+                    <p style={{ fontWeight: 700, color: 'var(--accent)' }}>✅ {extractedCourses.length} courses extracted — review & edit</p>
                     <button onClick={resetOcr} style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text-muted)', padding: '4px 10px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '0.8rem' }}>
                       ↩ Start Over
                     </button>
@@ -296,20 +379,31 @@ export default function ScanPage() {
                     value={extractedCsv}
                     onChange={e => setExtractedCsv(e.target.value)}
                     style={{
-                      width: '100%', minHeight: '220px', fontFamily: 'monospace', fontSize: '0.82rem',
+                      width: '100%', minHeight: '200px', fontFamily: 'monospace', fontSize: '0.82rem',
                       padding: '14px', background: 'var(--surface-2)', border: '1px solid var(--border)',
                       borderRadius: 'var(--radius-sm)', color: 'var(--text)', resize: 'vertical', boxSizing: 'border-box'
                     }}
                   />
-                  <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '6px' }}>
-                    Edit any mistakes above, then click Run Audit.
-                  </p>
-                  <button onClick={runOcrAudit}
-                    style={{ marginTop: '14px', padding: '10px 28px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: 700, fontSize: '1rem', cursor: 'pointer' }}>
-                    Run Audit →
-                  </button>
+                  <div style={{ display: 'flex', gap: '12px', marginTop: '12px' }}>
+                    <button onClick={handleEditCourses}
+                      style={{ padding: '10px 20px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: 600, cursor: 'pointer' }}>
+                      ✏️ Edit Courses Manually
+                    </button>
+                    <button onClick={runOcrAudit}
+                      style={{ padding: '10px 28px', background: 'var(--success)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: 700, cursor: 'pointer' }}>
+                      Run Audit →
+                    </button>
+                  </div>
                   {ocrError && <ErrorBox msg={ocrError} />}
                 </div>
+              )}
+
+              {ocrStep === 'editing' && (
+                <CourseEditor
+                  initialCourses={extractedCourses}
+                  onSave={handleSaveEditedCourses}
+                  onCancel={() => setOcrStep('review')}
+                />
               )}
 
               {ocrStep === 'auditing' && (
