@@ -86,6 +86,7 @@ export default function ScanPage() {
   const [csvLoading, setCsvLoading] = useState(false)
   const [csvError, setCsvError] = useState<string | null>(null)
   const [csvResult, setCsvResult] = useState<Record<string, unknown> | null>(null)
+  const [csvText, setCsvText] = useState('')
 
   // OCR mode
   const [ocrStep, setOcrStep] = useState<OcrStep>('idle')
@@ -100,6 +101,7 @@ export default function ScanPage() {
     setCsvError(null); setCsvLoading(true)
     try {
       const text = await file.text()
+      setCsvText(text)
       setCsvResult(runLocalAudit(text, program))
     } catch (e: unknown) {
       setCsvError(e instanceof Error ? e.message : String(e))
@@ -330,10 +332,10 @@ export default function ScanPage() {
 
         {/* Results */}
         {csvResult && mode === 'csv' && (
-          <div className="animate-in"><AuditReport scan={csvResult} /></div>
+          <div className="animate-in"><AuditReport scan={csvResult} csvText={csvText} /></div>
         )}
         {ocrResult && mode === 'ocr' && ocrStep === 'done' && (
-          <div className="animate-in"><AuditReport scan={ocrResult} /></div>
+          <div className="animate-in"><AuditReport scan={ocrResult} csvText={extractedCsv} /></div>
         )}
       </div>
       <Footer />
