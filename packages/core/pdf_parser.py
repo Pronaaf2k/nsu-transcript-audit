@@ -1,15 +1,19 @@
 """
-GradeTrace Core — Universal LLM Parser (Gemini 1.5 Flash)
+GradeTrace Core — Universal LLM Parser (Gemini 2.5 Flash Lite)
 
 Parses complex PDFs and images using Gemini with vision support,
 returning clean JSON with course data.
 """
 
+import gc
 import io
 import json
 import logging
 import re
 from typing import Optional
+
+import google.generativeai as genai
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -39,12 +43,6 @@ class VisionParser:
         """
         if not gemini_api_key:
             raise ValueError("GEMINI_API_KEY is required for transcript parsing.")
-
-        try:
-            import google.generativeai as genai
-            from PIL import Image
-        except ImportError as e:
-            raise ImportError(f"Required packages not installed: {e}")
 
         genai.configure(api_key=gemini_api_key)
 
@@ -79,7 +77,7 @@ Example output:
 [{"course_code": "CSE115", "course_name": "Programming Language I", "credits": 3, "grade": "A", "semester": "Spring", "year": 2023}]"""
 
         try:
-            model = genai.GenerativeModel('models/gemini-2.5-flash-image')
+            model = genai.GenerativeModel('gemini-2.5-flash-lite')
             contents = [prompt]
             for img in pages_to_process:
                 contents.append(img)
@@ -158,6 +156,10 @@ Example output:
             )
 
         logger.info(f"[Gemini] Extracted {len(records_deduped)} validated courses.")
+        
+        del images
+        gc.collect()
+        
         return records_deduped
 
     @classmethod
@@ -190,7 +192,6 @@ Example output:
                 for page in doc:
                     pix = page.get_pixmap(dpi=300)
                     img_data = pix.tobytes("png")
-                    from PIL import Image
                     images.append(Image.open(io.BytesIO(img_data)).convert("RGB"))
                 doc.close()
             except ImportError:
