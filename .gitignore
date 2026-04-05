@@ -4,12 +4,9 @@ node_modules/
 .pnp.js
 
 # Next.js
+packages/web/.next/
 web/.next/
 web/out/
-
-# Expo
-mobile/.expo/
-mobile/dist/
 
 # Python
 __pycache__/
@@ -17,8 +14,13 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+packages/api/.venv/
 dist/
 build/
+
+# Database
+*.db
+*.db-journal
 
 # Env files
 .env
@@ -37,3 +39,10 @@ Thumbs.db
 
 # k6 results
 load-tests/results/
+
+# Scripts
+*.pyc
+check_tables.py
+create_table.py
+list_tables.py
+setup_supabase.py
