@@ -1,15 +1,16 @@
 services:
   - type: web
     name: nsu-audit-api
-    env: docker
-    dockerContext: .
-    dockerfilePath: ./Dockerfile
+    runtime: python
+    buildCommand: pip install -r packages/api/requirements.txt
+    startCommand: uvicorn packages.api.main:app --host 0.0.0.0 --port $PORT
     envVars:
-      - key: AUDIT_API_KEY
-        generateValue: true      # Render auto-generates a secret value
-      - key: BATCH_WORKERS
-        value: "4"               # parallel Tesseract workers for bulk jobs
+      - key: GEMINI_API_KEY
+        sync: false
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
+      - key: AUDIT_API_KEY
+        sync: false
+    plan: free
