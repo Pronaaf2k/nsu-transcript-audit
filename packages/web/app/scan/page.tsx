@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useRef } from 'react'
-import { useRouter } from 'next/navigation'
 import Nav from '@/components/Nav'
 import Footer from '@/components/Footer'
 import AuditReport from '@/components/AuditReport'
@@ -23,139 +22,155 @@ const GRADE_POINTS: Record<string, number> = {
 }
 
 interface CourseRow {
-  Course_Code: string
-  Course_Name: string
-  Credits: string
-  Grade: string
-  Semester: string
+  Course_Code: string; Course_Name: string
+  Credits: string; Grade: string; Semester: string
 }
 
 function parseCSV(csvText: string): CourseRow[] {
   const lines = csvText.trim().split('\n')
   const rows: CourseRow[] = []
-  
   for (const line of lines) {
     const trimmed = line.trim()
     if (!trimmed || trimmed.toLowerCase().includes('course_code')) continue
-    
     const parts = trimmed.split(',').map(p => p.trim())
-    if (parts.length >= 5) {
+    if (parts.length >= 4) {
       rows.push({
-        Course_Code: parts[0] || '',
-        Course_Name: parts[1] || '',
-        Credits: parts[2] || '3',
-        Grade: parts[3] || '',
-        Semester: parts[4] || ''
+        Course_Code: parts[0] || '', Course_Name: parts[1] || '',
+        Credits: parts[2] || '3', Grade: parts[3] || '', Semester: parts[4] || ''
       })
     }
   }
   return rows
 }
 
-function runAudit(courses: CourseRow[], program: string) {
+function runLocalAudit(csvText: string, program: string) {
+  const courses = parseCSV(csvText)
+  if (courses.length === 0) throw new Error('No valid course data found')
   const passedBest: Record<string, number> = {}
   let totalCredits = 0
-  const courseRows: { course: string; credits: number; grade: string; status: string }[] = []
-
   for (const row of courses) {
     const course = row.Course_Code.toUpperCase()
     const grade = row.Grade.toUpperCase()
     const credits = parseFloat(row.Credits) || 0
     const pts = GRADE_POINTS[grade]
     const isPassing = !['F', 'W', 'I', 'X'].includes(grade)
-
-    if (isPassing) {
-      if (!(course in passedBest)) {
-        totalCredits += credits
-        passedBest[course] = pts ?? 0
-        courseRows.push({ course, credits, grade, status: 'Counted' })
-      } else {
-        courseRows.push({ course, credits, grade, status: pts && pts > passedBest[course] ? 'Retake (Ignored)' : 'Illegal Retake' })
-        if (pts !== undefined && pts > passedBest[course]) {
-          passedBest[course] = pts
-        }
-      }
-    } else {
-      const status = grade === 'W' ? 'Withdrawn' : grade === 'I' ? 'Incomplete' : 'Failed'
-      courseRows.push({ course, credits, grade, status })
+    if (isPassing && !(course in passedBest)) {
+      totalCredits += credits
+      passedBest[course] = pts ?? 0
+    } else if (isPassing && pts !== undefined && pts > passedBest[course]) {
+      passedBest[course] = pts
     }
   }
-
-  return { totalCredits, courseRows, passedBest }
-}
-
-function runFullAudit(csvText: string, program: string) {
-  const courses = parseCSV(csvText)
-  if (courses.length === 0) {
-    throw new Error('No valid course data found')
-  }
-
-  const l1 = runAudit(courses, program)
-  
-  const cgpa = Object.values(l1.passedBest).length > 0
-    ? (Object.values(l1.passedBest).reduce((a, b) => a + b, 0) / Object.values(l1.passedBest).length)
-    : 0
-
+  const cgpa = Object.values(passedBest).length > 0
+    ? Object.values(passedBest).reduce((a, b) => a + b, 0) / Object.values(passedBest).length : 0
+  const roundedCgpa = Math.round(cgpa * 100) / 100
   return {
-    level1: {
-      totalCredits: l1.totalCredits,
-      rows: l1.courseRows
-    },
-    level2: {
-      cgpa: Math.round(cgpa * 100) / 100,
-      gpaCredits: l1.totalCredits,
-      standing: cgpa >= 2.0 ? 'NORMAL' : 'PROBATION'
-    },
-    level3: {
-      eligible: cgpa >= 2.0 && l1.totalCredits >= 120,
-      totalEarned: l1.totalCredits,
-      cgpa: Math.round(cgpa * 100) / 100,
-      totalRequired: 120,
-      minCGPA: 2.0,
-      missing: {},
-      advisories: []
-    },
-    graduation_status: cgpa >= 2.0 && l1.totalCredits >= 120 ? 'PASS' : 'FAIL',
-    total_credits: l1.totalCredits
+    level1: { totalCredits, rows: [] },
+    level2: { cgpa: roundedCgpa, gpaCredits: totalCredits, standing: cgpa >= 2.0 ? 'NORMAL' : 'PROBATION' },
+    level3: { eligible: cgpa >= 2.0 && totalCredits >= 120, totalEarned: totalCredits, cgpa: roundedCgpa, totalRequired: 120, minCGPA: 2.0, missing: {}, advisories: [] },
+    graduation_status: cgpa >= 2.0 && totalCredits >= 120 ? 'PASS' : 'FAIL',
+    total_credits: totalCredits
   }
 }
+
+type Mode = 'csv' | 'ocr'
+type OcrStep = 'idle' | 'extracting' | 'review' | 'auditing' | 'done'
 
 export default function ScanPage() {
-  const inputRef = useRef<HTMLInputElement>(null)
+  const csvInputRef = useRef<HTMLInputElement>(null)
+  const ocrInputRef = useRef<HTMLInputElement>(null)
   const [program, setProgram] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [result, setResult] = useState<Record<string, unknown> | null>(null)
+  const [mode, setMode] = useState<Mode>('csv')
 
-  async function handleUpload(file: File) {
-    if (!program) {
-      setError('Please select your program first')
-      return
-    }
-    
-    setError(null)
-    setLoading(true)
-    
+  // CSV mode
+  const [csvLoading, setCsvLoading] = useState(false)
+  const [csvError, setCsvError] = useState<string | null>(null)
+  const [csvResult, setCsvResult] = useState<Record<string, unknown> | null>(null)
+
+  // OCR mode
+  const [ocrStep, setOcrStep] = useState<OcrStep>('idle')
+  const [ocrError, setOcrError] = useState<string | null>(null)
+  const [extractedCsv, setExtractedCsv] = useState('')
+  const [ocrResult, setOcrResult] = useState<Record<string, unknown> | null>(null)
+  const [ocrFile, setOcrFile] = useState<File | null>(null)
+
+  // ── CSV mode ──────────────────────────────────────────────────────────────
+  async function handleCsvUpload(file: File) {
+    if (!program) { setCsvError('Please select your program first'); return }
+    setCsvError(null); setCsvLoading(true)
     try {
       const text = await file.text()
-      const auditResult = runFullAudit(text, program)
-      setResult(auditResult)
+      setCsvResult(runLocalAudit(text, program))
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setLoading(false)
+      setCsvError(e instanceof Error ? e.message : String(e))
+    } finally { setCsvLoading(false) }
+  }
+
+  // ── OCR mode ──────────────────────────────────────────────────────────────
+  async function handleOcrUpload(file: File) {
+    if (!program) { setOcrError('Please select your program first'); return }
+    setOcrFile(file); setOcrError(null); setOcrStep('extracting')
+    setExtractedCsv(''); setOcrResult(null)
+
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL
+    if (!apiUrl) {
+      setOcrError('NEXT_PUBLIC_API_URL is not set. Deploy the backend first.')
+      setOcrStep('idle'); return
+    }
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch(`${apiUrl}/audit/extract`, {
+        method: 'POST',
+        body: formData,
+        signal: AbortSignal.timeout(120000)
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }))
+        throw new Error(err.detail || 'Extraction failed')
+      }
+      const data = await res.json()
+      setExtractedCsv(data.csv_text || '')
+      setOcrStep('review')
+    } catch (e: unknown) {
+      setOcrError(e instanceof Error ? e.message : String(e))
+      setOcrStep('idle')
     }
   }
 
-  function handleDrop(e: React.DragEvent) {
-    e.preventDefault()
-    const f = e.dataTransfer.files[0]
-    if (f && (f.name.endsWith('.csv') || f.type === 'text/csv')) {
-      handleUpload(f)
-    } else {
-      setError('Please upload a CSV file')
+  async function runOcrAudit() {
+    if (!extractedCsv || !program) return
+    setOcrStep('auditing'); setOcrError(null)
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL
+      const res = await fetch(`${apiUrl}/audit/run_csv`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ csv_text: extractedCsv, program })
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }))
+        throw new Error(err.detail || 'Audit failed')
+      }
+      const data = await res.json()
+      setOcrResult(data); setOcrStep('done')
+    } catch (e: unknown) {
+      setOcrError(e instanceof Error ? e.message : String(e))
+      setOcrStep('review')
     }
   }
+
+  function resetOcr() {
+    setOcrStep('idle'); setExtractedCsv(''); setOcrResult(null); setOcrError(null); setOcrFile(null)
+  }
+
+  const tabStyle = (active: boolean): React.CSSProperties => ({
+    padding: '8px 20px', borderRadius: 'var(--radius-sm)', fontWeight: 600,
+    fontSize: '0.9rem', cursor: 'pointer', border: 'none', transition: 'all 0.15s',
+    background: active ? 'var(--accent)' : 'var(--surface-2)',
+    color: active ? '#fff' : 'var(--text-muted)',
+  })
 
   return (
     <>
@@ -163,80 +178,173 @@ export default function ScanPage() {
       <div className="container">
         <div className="page-header">
           <h1>New Scan</h1>
-          <p>Upload a CSV transcript to run a graduation audit.</p>
+          <p>Upload a transcript to run a graduation audit.</p>
         </div>
 
         <div className="card" style={{ marginBottom: '24px' }}>
+          {/* Program select */}
           <div className="form-group">
-            <label htmlFor="program-select" style={{ fontWeight: 600, marginBottom: '8px', display: 'block' }}>
+            <label style={{ fontWeight: 600, marginBottom: '8px', display: 'block' }}>
               1. Select Your Program <span style={{ color: 'var(--danger)' }}>*</span>
             </label>
-            <select 
-              id="program-select" 
-              value={program} 
-              onChange={e => setProgram(e.target.value)}
-              style={{ width: '100%', padding: '12px', fontSize: '1rem' }}
-            >
+            <select value={program} onChange={e => setProgram(e.target.value)}
+              style={{ width: '100%', padding: '12px', fontSize: '1rem' }}>
               <option value="">-- Select your program --</option>
-              {PROGRAMS.map(p => (
-                <option key={p.code} value={p.code}>{p.name}</option>
-              ))}
+              {PROGRAMS.map(p => <option key={p.code} value={p.code}>{p.name}</option>)}
             </select>
           </div>
-          
+
+          {/* Mode toggle */}
           <div style={{ marginTop: '24px' }}>
             <label style={{ fontWeight: 600, marginBottom: '12px', display: 'block' }}>
-              2. Upload Transcript CSV
+              2. Choose Upload Method
             </label>
-            <div 
-              style={{ 
-                padding: '24px', 
-                border: `2px dashed ${program ? 'var(--border)' : 'var(--text-muted)'}`, 
-                borderRadius: 'var(--radius)',
-                opacity: program ? 1 : 0.5,
-                pointerEvents: program ? 'auto' : 'none',
-                textAlign: 'center',
-                cursor: program ? 'pointer' : 'default'
-              }}
-              onClick={() => inputRef.current?.click()}
-              onDragOver={e => e.preventDefault()}
-              onDrop={handleDrop}
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ width: '40px', height: '40px', color: 'var(--text-muted)', margin: '0 auto 12px' }}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-              </svg>
-              <p>Drag & drop a CSV file, or click to browse</p>
-              <p style={{ fontSize: '0.8rem', marginTop: '4px', opacity: 0.7 }}>Format: Course_Code, Course_Name, Credits, Grade, Semester</p>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button style={tabStyle(mode === 'csv')} onClick={() => setMode('csv')}>
+                📄 CSV Upload
+              </button>
+              <button style={tabStyle(mode === 'ocr')} onClick={() => setMode('ocr')}>
+                🔍 OCR — PDF / Image
+              </button>
             </div>
-            <input
-              ref={inputRef}
-              type="file"
-              accept=".csv"
-              style={{ display: 'none' }}
-              onChange={e => { const f = e.target.files?.[0]; if (f) handleUpload(f) }}
-            />
           </div>
-          
-          {loading && (
-            <div style={{ marginTop: '20px', padding: '16px', background: 'var(--surface-2)', borderRadius: 'var(--radius-sm)', textAlign: 'center' }}>
-              <p style={{ color: 'var(--accent)', fontWeight: 600 }}>Processing transcript...</p>
+
+          {/* ── CSV MODE ── */}
+          {mode === 'csv' && (
+            <div style={{ marginTop: '20px' }}>
+              <div
+                style={{
+                  padding: '32px', border: `2px dashed ${program ? 'var(--border)' : 'var(--text-muted)'}`,
+                  borderRadius: 'var(--radius)', opacity: program ? 1 : 0.5,
+                  pointerEvents: program ? 'auto' : 'none', textAlign: 'center', cursor: 'pointer'
+                }}
+                onClick={() => csvInputRef.current?.click()}
+                onDragOver={e => e.preventDefault()}
+                onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleCsvUpload(f) }}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}
+                  style={{ width: '40px', height: '40px', color: 'var(--text-muted)', margin: '0 auto 12px' }}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+                <p>Drag & drop a CSV file, or click to browse</p>
+                <p style={{ fontSize: '0.8rem', marginTop: '4px', opacity: 0.7 }}>Format: Course_Code, Course_Name, Credits, Grade, Semester</p>
+              </div>
+              <input ref={csvInputRef} type="file" accept=".csv" style={{ display: 'none' }}
+                onChange={e => { const f = e.target.files?.[0]; if (f) handleCsvUpload(f) }} />
+              {csvLoading && (
+                <div style={{ marginTop: '16px', padding: '14px', background: 'var(--surface-2)', borderRadius: 'var(--radius-sm)', textAlign: 'center' }}>
+                  <p style={{ color: 'var(--accent)', fontWeight: 600 }}>Processing transcript...</p>
+                </div>
+              )}
+              {csvError && <ErrorBox msg={csvError} />}
             </div>
           )}
-          
-          {error && (
-            <div style={{ marginTop: '16px', padding: '12px', background: 'rgba(244,63,94,0.1)', borderRadius: 'var(--radius-sm)', color: 'var(--danger)' }}>
-              <strong>Error:</strong> {error}
+
+          {/* ── OCR MODE ── */}
+          {mode === 'ocr' && (
+            <div style={{ marginTop: '20px' }}>
+              {ocrStep === 'idle' && (
+                <>
+                  <div
+                    style={{
+                      padding: '32px', border: `2px dashed ${program ? 'var(--accent)' : 'var(--text-muted)'}`,
+                      borderRadius: 'var(--radius)', opacity: program ? 1 : 0.5,
+                      pointerEvents: program ? 'auto' : 'none', textAlign: 'center', cursor: 'pointer',
+                      background: 'rgba(99,102,241,0.04)'
+                    }}
+                    onClick={() => ocrInputRef.current?.click()}
+                    onDragOver={e => e.preventDefault()}
+                    onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleOcrUpload(f) }}
+                  >
+                    <div style={{ fontSize: '2.5rem', marginBottom: '8px' }}>🔍</div>
+                    <p style={{ fontWeight: 600 }}>Drop a PDF or image transcript here</p>
+                    <p style={{ fontSize: '0.8rem', marginTop: '6px', opacity: 0.7 }}>
+                      Gemini 2.5 Flash will extract courses — you can review before auditing
+                    </p>
+                    <p style={{ fontSize: '0.75rem', marginTop: '4px', color: 'var(--accent)', opacity: 0.8 }}>
+                      ⚡ Wake the backend first if it's been inactive
+                    </p>
+                  </div>
+                  <input ref={ocrInputRef} type="file" accept=".pdf,.png,.jpg,.jpeg,.webp"
+                    style={{ display: 'none' }}
+                    onChange={e => { const f = e.target.files?.[0]; if (f) handleOcrUpload(f) }} />
+                  {ocrError && <ErrorBox msg={ocrError} />}
+                </>
+              )}
+
+              {ocrStep === 'extracting' && (
+                <div style={{ padding: '32px', textAlign: 'center', background: 'var(--surface-2)', borderRadius: 'var(--radius)' }}>
+                  <div style={{ fontSize: '2rem', marginBottom: '12px' }}>⏳</div>
+                  <p style={{ color: 'var(--accent)', fontWeight: 700, fontSize: '1.1rem' }}>Extracting courses with Gemini...</p>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '6px' }}>
+                    {ocrFile?.name} — this may take 15–30 seconds
+                  </p>
+                </div>
+              )}
+
+              {ocrStep === 'review' && (
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <p style={{ fontWeight: 700, color: 'var(--accent)' }}>✅ Extraction complete — review & edit before auditing</p>
+                    <button onClick={resetOcr} style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text-muted)', padding: '4px 10px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '0.8rem' }}>
+                      ↩ Start Over
+                    </button>
+                  </div>
+                  <textarea
+                    value={extractedCsv}
+                    onChange={e => setExtractedCsv(e.target.value)}
+                    style={{
+                      width: '100%', minHeight: '220px', fontFamily: 'monospace', fontSize: '0.82rem',
+                      padding: '14px', background: 'var(--surface-2)', border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius-sm)', color: 'var(--text)', resize: 'vertical', boxSizing: 'border-box'
+                    }}
+                  />
+                  <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '6px' }}>
+                    Edit any mistakes above, then click Run Audit.
+                  </p>
+                  <button onClick={runOcrAudit}
+                    style={{ marginTop: '14px', padding: '10px 28px', background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)', fontWeight: 700, fontSize: '1rem', cursor: 'pointer' }}>
+                    Run Audit →
+                  </button>
+                  {ocrError && <ErrorBox msg={ocrError} />}
+                </div>
+              )}
+
+              {ocrStep === 'auditing' && (
+                <div style={{ padding: '24px', textAlign: 'center', background: 'var(--surface-2)', borderRadius: 'var(--radius)' }}>
+                  <p style={{ color: 'var(--accent)', fontWeight: 700 }}>Running audit...</p>
+                </div>
+              )}
+
+              {ocrStep === 'done' && (
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' }}>
+                  <button onClick={resetOcr}
+                    style={{ background: 'none', border: '1px solid var(--border)', color: 'var(--text-muted)', padding: '6px 14px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '0.85rem' }}>
+                    ↩ New OCR Scan
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
 
-        {result && (
-          <div className="animate-in">
-            <AuditReport scan={result} />
-          </div>
+        {/* Results */}
+        {csvResult && mode === 'csv' && (
+          <div className="animate-in"><AuditReport scan={csvResult} /></div>
+        )}
+        {ocrResult && mode === 'ocr' && ocrStep === 'done' && (
+          <div className="animate-in"><AuditReport scan={ocrResult} /></div>
         )}
       </div>
       <Footer />
     </>
+  )
+}
+
+function ErrorBox({ msg }: { msg: string }) {
+  return (
+    <div style={{ marginTop: '14px', padding: '12px 16px', background: 'rgba(244,63,94,0.1)', borderRadius: 'var(--radius-sm)', color: 'var(--danger)' }}>
+      <strong>Error:</strong> {msg}
+    </div>
   )
 }
