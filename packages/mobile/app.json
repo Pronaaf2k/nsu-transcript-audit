@@ -14,14 +14,25 @@
         },
         "ios": {
             "supportsTablet": true,
-            "bundleIdentifier": "com.nsu.transcriptaudit"
+            "bundleIdentifier": "com.nsu.transcriptaudit",
+            "infoPlist": {
+                "NSCameraUsageDescription": "This app uses the camera to scan transcripts",
+                "NSPhotoLibraryUsageDescription": "This app accesses photos to select transcript images",
+                "NSMicrophoneUsageDescription": "This app uses the microphone for video recording"
+            }
         },
         "android": {
             "package": "com.nsu.transcriptaudit",
             "adaptiveIcon": {
                 "foregroundImage": "./assets/adaptive-icon.png",
                 "backgroundColor": "#0d0f14"
-            }
+            },
+            "permissions": [
+                "READ_EXTERNAL_STORAGE",
+                "WRITE_EXTERNAL_STORAGE",
+                "CAMERA",
+                "INTERNET"
+            ]
         },
         "plugins": [
             "expo-router",

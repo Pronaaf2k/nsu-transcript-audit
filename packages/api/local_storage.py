@@ -60,6 +60,20 @@ def init_db():
         )
     """)
     
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS feedback (
+            id TEXT PRIMARY KEY,
+            user_id TEXT,
+            created_at TEXT NOT NULL,
+            rating INTEGER,
+            category TEXT,
+            feature_used TEXT,
+            improvements TEXT,
+            freeform TEXT,
+            audit_id TEXT
+        )
+    """)
+    
     conn.commit()
     conn.close()
 
@@ -213,6 +227,57 @@ def export_audits_csv(audit_ids: list[str] | None = None) -> str:
         writer.writerows(rows)
     
     return output.getvalue()
+
+
+def save_feedback(user_id: str, feedback: dict[str, Any]) -> str:
+    """Save user feedback (structured + freeform)."""
+    init_db()
+    
+    feedback_id = str(uuid.uuid4())
+    created_at = datetime.utcnow().isoformat()
+    
+    conn = _get_db()
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        INSERT INTO feedback (id, user_id, created_at, rating, category, feature_used, improvements, freeform, audit_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        feedback_id,
+        user_id,
+        created_at,
+        feedback.get("rating"),
+        feedback.get("category"),
+        feedback.get("feature_used"),
+        feedback.get("improvements"),
+        feedback.get("freeform"),
+        feedback.get("audit_id"),
+    ))
+    
+    conn.commit()
+    conn.close()
+    
+    return feedback_id
+
+
+def get_feedback(user_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    """Get feedback entries."""
+    init_db()
+    
+    conn = _get_db()
+    cursor = conn.cursor()
+    
+    if user_id:
+        cursor.execute("""
+            SELECT * FROM feedback WHERE user_id = ? ORDER BY created_at DESC LIMIT ?
+        """, (user_id, limit))
+    else:
+        cursor.execute("SELECT * FROM feedback ORDER BY created_at DESC LIMIT ?", (limit,))
+    
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    
+    return rows
 
 
 # Initialize DB on import

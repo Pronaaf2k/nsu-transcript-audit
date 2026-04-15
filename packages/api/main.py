@@ -33,6 +33,11 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+# Ensure repo root is importable before package imports.
+ROOT_DIR = Path(__file__).parent.parent.parent
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -43,12 +48,6 @@ from packages.core.program_knowledge import (
     list_supported_programs,
     normalize_program_code,
 )
-
-
-
-# ── Path setup ────────────────────────────────────────────────────────────────
-ROOT_DIR = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(ROOT_DIR))
 
 try:
     from dotenv import load_dotenv
@@ -76,7 +75,7 @@ except ImportError as e:
     print(f"Warning: Batch router not available: {e}")
 
 # Import storage modules (local SQLite + optional Supabase)
-from packages.api.local_storage import save_audit, get_audit, get_audit_history, delete_audit
+from packages.api.local_storage import save_audit, get_audit, get_audit_history, delete_audit, save_feedback, get_feedback
 
 try:
     from packages.api.supabase_client import save_transcript_and_audit
@@ -381,5 +380,50 @@ def delete_audit_by_id(
         return {"deleted": True, "id": audit_id}
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class FeedbackRequest(BaseModel):
+    rating: int
+    category: str
+    feature_used: str
+    improvements: str | None = None
+    freeform: str | None = None
+    audit_id: str | None = None
+
+
+@app.post("/feedback")
+def submit_feedback(
+    current_user: CurrentUser,
+    feedback: FeedbackRequest,
+):
+    """Submit user feedback (structured + freeform)."""
+    try:
+        feedback_id = save_feedback(current_user, feedback.model_dump())
+        return {"id": feedback_id, "status": "saved"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/feedback")
+def get_feedback_route(
+    current_user: CurrentUser,
+    limit: int = 100,
+):
+    """Get feedback history."""
+    try:
+        return get_feedback(current_user, limit=limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/feedback/all")
+def get_all_feedback(
+    limit: int = 100,
+):
+    """Get all feedback (admin endpoint - no auth required for demo)."""
+    try:
+        return get_feedback(user_id=None, limit=limit)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
