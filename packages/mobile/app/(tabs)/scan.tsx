@@ -3,7 +3,8 @@ import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, Scr
 import * as DocumentPicker from 'expo-document-picker'
 import { supabase } from '../../lib/supabase'
 
-const PROGRAMS = ['CSE', 'BBA', 'EEE', 'ECE', 'ENG', 'PHY', 'MATH']
+const PROGRAMS = ['CSE', 'BBA', 'ETE', 'ENV', 'ENG', 'ECO']
+const API_URL = process.env.EXPO_PUBLIC_API_URL ?? ''
 
 export default function ScanScreen() {
     const [program, setProgram] = useState('CSE')
@@ -24,36 +25,39 @@ export default function ScanScreen() {
         try {
             const { data: { session } } = await supabase.auth.getSession()
             const token = session?.access_token
-            const user = session?.user
-            if (!token || !user) throw new Error('Not authenticated')
+            if (!token) throw new Error('Not authenticated')
+            if (!API_URL) throw new Error('EXPO_PUBLIC_API_URL is not set')
 
-            let body: Record<string, unknown>
-
+            let res: Response
             if (file.name?.endsWith('.csv') || file.mimeType?.includes('csv')) {
                 const resp = await fetch(file.uri)
                 const csv_text = await resp.text()
-                body = { csv_text, program, file_name: file.name }
+                res = await fetch(`${API_URL}/audit/run_csv`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({ csv_text, program }),
+                })
             } else {
-                // Upload to storage
-                const path = `${user.id}/${Date.now()}-${file.name}`
-                const fileResp = await fetch(file.uri)
-                const blob = await fileResp.blob()
-                const { error: upErr } = await supabase.storage.from('transcripts').upload(path, blob)
-                if (upErr) throw upErr
-                body = { storage_path: path, source_type: file.mimeType?.includes('pdf') ? 'pdf' : 'image', program, file_name: file.name }
+                const form = new FormData()
+                form.append('program', program)
+                form.append('file', {
+                    uri: file.uri,
+                    name: file.name ?? 'transcript',
+                    type: file.mimeType ?? 'application/octet-stream',
+                } as never)
+                res = await fetch(`${API_URL}/audit/image`, {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${token}` },
+                    body: form,
+                })
             }
 
-            const res = await fetch(
-                `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/process-transcript`,
-                {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                    body: JSON.stringify(body),
-                }
-            )
             const json = await res.json()
-            if (!res.ok) throw new Error(json.error ?? 'Audit failed')
-            setResult(json.scan)
+            if (!res.ok) throw new Error(json.detail ?? 'Audit failed')
+            setResult(json)
         } catch (e: unknown) {
             Alert.alert('Error', e instanceof Error ? e.message : String(e))
         } finally {

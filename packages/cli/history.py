@@ -5,22 +5,30 @@ from __future__ import annotations
 
 from rich.console import Console
 from rich.table import Table
+import httpx
+import os
 
 from auth import get_client
 
 console = Console()
+API_URL = os.environ.get("NEXT_PUBLIC_API_URL") or os.environ.get("GRADGATE_API_URL") or "http://localhost:8000"
 
 
 def list_history(limit: int = 20) -> None:
     supabase = get_client()
-    resp = (
-        supabase.table("transcript_scans")
-        .select("id, created_at, file_name, program, total_credits, cgpa, graduation_status")
-        .order("created_at", desc=True)
-        .limit(limit)
-        .execute()
+    session = supabase.auth.get_session()
+    token = session.access_token
+
+    res = httpx.get(
+        f"{API_URL.rstrip('/')}/history",
+        params={"limit": limit},
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=30,
     )
-    scans = resp.data or []
+    if not res.is_success:
+        detail = res.json().get("detail", res.text)
+        raise RuntimeError(f"History request failed: {detail}")
+    scans = res.json() or []
 
     if not scans:
         console.print("[yellow]No scans found.[/yellow]")
@@ -55,14 +63,20 @@ def list_history(limit: int = 20) -> None:
 
 def show_report(scan_id: str) -> None:
     supabase = get_client()
-    resp = (
-        supabase.table("transcript_scans")
-        .select("*")
-        .eq("id", scan_id)
-        .single()
-        .execute()
+    session = supabase.auth.get_session()
+    token = session.access_token
+    res = httpx.get(
+        f"{API_URL.rstrip('/')}/history/{scan_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=30,
     )
-    scan = resp.data
+    if res.status_code == 404:
+        console.print(f"[red]Scan not found:[/red] {scan_id}")
+        raise SystemExit(1)
+    if not res.is_success:
+        detail = res.json().get("detail", res.text)
+        raise RuntimeError(f"Report request failed: {detail}")
+    scan = res.json()
     if not scan:
         console.print(f"[red]Scan not found:[/red] {scan_id}")
         raise SystemExit(1)

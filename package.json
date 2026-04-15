@@ -4,6 +4,12 @@
   "private": true,
   "description": "GradeTrace — Academic transcript auditing platform for NSU",
   "scripts": {
+    "setup:local": "powershell -ExecutionPolicy Bypass -File ./scripts/setup-local.ps1",
+    "dev:local": "powershell -ExecutionPolicy Bypass -File ./scripts/dev-local.ps1",
+    "cli": "powershell -ExecutionPolicy Bypass -File ./scripts/run-cli.ps1",
+    "test:all": "powershell -ExecutionPolicy Bypass -File ./scripts/test-all.ps1",
+    "test:py": "powershell -ExecutionPolicy Bypass -Command \"& '.\\packages\\api\\.venv\\Scripts\\python.exe' -m pytest tests/test_api_endpoints.py tests/test_program_knowledge.py -q\"",
+    "test:web": "pnpm --filter web lint && pnpm --filter web exec tsc --noEmit",
     "dev:web": "pnpm --filter web dev",
     "dev:api": "cd packages/api && .\\.venv\\Scripts\\python -m uvicorn main:app --reload --port 8000",
     "dev:mobile": "pnpm --filter mobile start",

@@ -1,28 +1,83 @@
-import { createClient } from '@/lib/supabase/server'
-import { redirect } from 'next/navigation'
+'use client'
+
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import Nav from '@/components/Nav'
 import Footer from '@/components/Footer'
 import ScanHistoryTable from '@/components/ScanHistoryTable'
+import { createClient } from '@/lib/supabase/client'
 
-export default async function DashboardPage() {
+type Scan = {
+    id: string
+    created_at: string
+    program: string
+    total_credits: number
+    cgpa: number
+    graduation_status: string
+    source_type: string
+}
+
+export default function DashboardPage() {
+    const router = useRouter()
     const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) redirect('/login')
+    const [userEmail, setUserEmail] = useState<string | undefined>()
+    const [scans, setScans] = useState<Scan[]>([])
+    const [loading, setLoading] = useState(true)
 
-    const { data: scans } = await supabase
-        .from('transcript_scans')
-        .select('id, created_at, source_type, file_name, program, total_credits, cgpa, graduation_status')
-        .order('created_at', { ascending: false })
-        .limit(50)
+    useEffect(() => {
+        let mounted = true
 
-    const totalScans = scans?.length || 0
-    const passCount = scans?.filter(s => s.graduation_status === 'PASS').length || 0
-    const failCount = scans?.filter(s => s.graduation_status === 'FAIL').length || 0
+        async function load() {
+            const { data: { session } } = await supabase.auth.getSession()
+            if (!session) {
+                router.replace('/login')
+                return
+            }
+            if (!mounted) return
+            setUserEmail(session.user.email)
+
+            const apiUrl = process.env.NEXT_PUBLIC_API_URL
+            if (!apiUrl) {
+                setLoading(false)
+                return
+            }
+
+            const res = await fetch(`${apiUrl}/history?limit=50`, {
+                headers: { Authorization: `Bearer ${session.access_token}` }
+            })
+            if (!mounted) return
+            if (!res.ok) {
+                setLoading(false)
+                return
+            }
+
+            const data = await res.json()
+            setScans(
+                Array.isArray(data)
+                    ? data.map((scan) => ({
+                        ...scan,
+                        source_type: scan?.source_type ?? 'unknown'
+                    }))
+                    : []
+            )
+            setLoading(false)
+        }
+
+        load()
+        return () => { mounted = false }
+    }, [router, supabase])
+
+    const { totalScans, passCount, failCount } = useMemo(() => {
+        const total = scans.length
+        const pass = scans.filter(s => s.graduation_status === 'PASS').length
+        const fail = scans.filter(s => s.graduation_status === 'FAIL').length
+        return { totalScans: total, passCount: pass, failCount: fail }
+    }, [scans])
 
     return (
         <>
-            <Nav user={user} />
+            <Nav user={userEmail ? { email: userEmail } : undefined} />
             <div className="container">
                 <div className="page-header">
                     <h1>Dashboard</h1>
@@ -43,30 +98,27 @@ export default async function DashboardPage() {
                         <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textTransform: 'uppercase', marginTop: '4px' }}>Not Eligible</div>
                     </div>
                     <div className="card" style={{ textAlign: 'center', padding: '24px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '12px' }}>
-                        <Link href="/audit" className="btn btn-primary" style={{ width: '100%' }}>
-                            ◉ Audit Engine
-                        </Link>
                         <Link href="/scan" className="btn btn-outline" style={{ width: '100%' }}>
-                            + New Scan
+                            ◉ Scan & Audit
                         </Link>
                     </div>
                 </div>
 
                 <h2 style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '16px' }}>Recent Audits</h2>
 
-                {scans && scans.length > 0
-                    ? <ScanHistoryTable scans={scans} />
-                    : (
-                        <div className="card" style={{ textAlign: 'center', padding: '60px' }}>
-                            <div style={{ fontSize: '3rem', marginBottom: '16px' }}>📄</div>
-                            <p style={{ color: 'var(--text-muted)', marginBottom: '20px' }}>No scans yet.</p>
-                            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
-                                <Link href="/scan" className="btn btn-primary">+ New Scan</Link>
-                                <Link href="/audit" className="btn btn-outline">Use Audit Engine</Link>
-                            </div>
+                {loading ? (
+                    <div className="card" style={{ textAlign: 'center', padding: '40px' }}>Loading history…</div>
+                ) : scans.length > 0 ? (
+                    <ScanHistoryTable scans={scans} />
+                ) : (
+                    <div className="card" style={{ textAlign: 'center', padding: '60px' }}>
+                        <div style={{ fontSize: '3rem', marginBottom: '16px' }}>📄</div>
+                        <p style={{ color: 'var(--text-muted)', marginBottom: '20px' }}>No scans yet.</p>
+                        <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                            <Link href="/scan" className="btn btn-primary">◉ Scan & Audit</Link>
                         </div>
-                    )
-                }
+                    </div>
+                )}
             </div>
             <Footer />
         </>

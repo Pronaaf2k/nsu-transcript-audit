@@ -62,6 +62,35 @@ A full-stack graduation audit system for North South University (NSU) students. 
 - Supabase account
 - Gemini API key
 
+### Quick Local Run (Windows)
+
+From repo root:
+
+```powershell
+pnpm setup:local
+pnpm dev:local
+```
+
+This starts:
+- Web app: `http://localhost:3000`
+- API docs: `http://localhost:8000/docs`
+
+Run CLI from repo root:
+
+```powershell
+pnpm cli -- --help
+pnpm cli
+pnpm cli -- audit sample.csv --program CSE
+```
+
+`pnpm cli` opens an interactive menu with login, scan, audit, history, and report options.
+
+Run full test suite from repo root:
+
+```powershell
+pnpm test:all
+```
+
 ### Local Development
 
 1. **Clone the repo**
@@ -84,7 +113,14 @@ pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
 
-4. **Environment Variables**
+4. **CLI**
+```bash
+cd packages/cli
+pip install -r requirements.txt
+py main.py --help
+```
+
+5. **Environment Variables**
 
 Frontend (`packages/web/.env.local`):
 ```
@@ -109,6 +145,8 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_key
 | POST | `/audit/run_csv` | Run full audit from CSV text |
 | POST | `/audit/csv` | Upload CSV file directly |
 | POST | `/audit/image` | Upload image/PDF and audit |
+| GET | `/programs` | List canonical programs from `program.md` |
+| GET | `/programs/{code}` | Get full requirements for one program |
 | GET | `/history` | Get audit history |
 | GET | `/history/{id}` | Get specific audit |
 
@@ -124,12 +162,10 @@ MAT116,Mathematics I,3,B+,Summer 2023
 
 - CSE - Computer Science & Engineering
 - BBA - Business Administration
-- EEE - Electrical & Electronic Engineering
-- ECE - Electronics & Computer Engineering
+- ETE - Electronic & Telecom Engineering
 - ENG - English
 - ECO - Economics
-- ENV - Environmental Science
-- PHY - Physics
+- ENV - Environmental Science & Management
 
 ## License
 

@@ -9,8 +9,9 @@ import sys
 import tempfile
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'cli'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
 from packages.cli.audit.audit_l1 import calculate_credits
 from packages.cli.audit.audit_l2 import calculate_cgpa

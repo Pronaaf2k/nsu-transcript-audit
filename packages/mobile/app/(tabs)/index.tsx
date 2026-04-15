@@ -3,6 +3,8 @@ import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator }
 import { useRouter } from 'expo-router'
 import { supabase } from '../../lib/supabase'
 
+const API_URL = process.env.EXPO_PUBLIC_API_URL ?? ''
+
 interface Scan {
     id: string
     created_at: string
@@ -18,12 +20,27 @@ export default function DashboardScreen() {
     const [loading, setLoading] = useState(true)
 
     useEffect(() => {
-        supabase
-            .from('transcript_scans')
-            .select('id, created_at, program, total_credits, cgpa, graduation_status')
-            .order('created_at', { ascending: false })
-            .limit(50)
-            .then(({ data }) => { setScans(data ?? []); setLoading(false) })
+        async function loadHistory() {
+            const { data: { session } } = await supabase.auth.getSession()
+            if (!session || !API_URL) {
+                setScans([])
+                setLoading(false)
+                return
+            }
+
+            const res = await fetch(`${API_URL}/history?limit=50`, {
+                headers: { Authorization: `Bearer ${session.access_token}` },
+            })
+            if (!res.ok) {
+                setScans([])
+                setLoading(false)
+                return
+            }
+            const data = await res.json()
+            setScans(Array.isArray(data) ? data : [])
+            setLoading(false)
+        }
+        loadHistory()
     }, [])
 
     const statusColor = (s: string) =>

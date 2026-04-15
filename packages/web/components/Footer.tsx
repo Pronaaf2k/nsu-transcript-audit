@@ -5,8 +5,7 @@ import { usePathname } from 'next/navigation'
 
 const NAV_ITEMS = [
     { href: '/dashboard', label: 'Dashboard', icon: '◈' },
-    { href: '/audit', label: 'Audit Engine', icon: '◉' },
-    { href: '/scan', label: 'New Scan', icon: '+' },
+    { href: '/scan', label: 'Scan & Audit', icon: '◉' },
 ]
 
 export default function Footer() {

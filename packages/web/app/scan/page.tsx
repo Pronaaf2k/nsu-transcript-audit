@@ -1,21 +1,19 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import Nav from '@/components/Nav'
 import Footer from '@/components/Footer'
 import AuditReport from '@/components/AuditReport'
 import CourseEditor from '@/components/CourseEditor'
 import { createClient } from '@/lib/supabase/client'
 
-const PROGRAMS = [
-  { code: 'CSE', name: 'Computer Science & Engineering (CSE)' },
-  { code: 'BBA', name: 'Business Administration (BBA)' },
-  { code: 'EEE', name: 'Electrical & Electronic Engineering (EEE)' },
-  { code: 'ECE', name: 'Electronics & Computer Engineering (ECE)' },
+const FALLBACK_PROGRAMS = [
+  { code: 'CSE', name: 'Computer Science & Engineering' },
+  { code: 'BBA', name: 'Business Administration' },
+  { code: 'ETE', name: 'Electronic & Telecom Engineering' },
+  { code: 'ENV', name: 'Environmental Science & Management' },
   { code: 'ENG', name: 'English' },
   { code: 'ECO', name: 'Economics' },
-  { code: 'ENV', name: 'Environmental Science' },
-  { code: 'PHY', name: 'Physics' },
 ]
 
 const GRADE_POINTS: Record<string, number> = {
@@ -54,37 +52,6 @@ function parseCSVToCourses(csvText: string): ParsedCourse[] {
   return rows
 }
 
-function runLocalAudit(csvText: string, program: string) {
-  const courses = parseCSVToCourses(csvText)
-  if (courses.length === 0) throw new Error('No valid course data found')
-  const passedBest: Record<string, number> = {}
-  let totalCredits = 0
-  for (const row of courses) {
-    const course = row.course.toUpperCase()
-    const grade = row.grade.toUpperCase()
-    const credits = row.credits
-    const pts = GRADE_POINTS[grade]
-    const isPassing = !['F', 'W', 'I', 'X'].includes(grade)
-    if (isPassing && !(course in passedBest)) {
-      totalCredits += credits
-      passedBest[course] = pts ?? 0
-    } else if (isPassing && pts !== undefined && pts > passedBest[course]) {
-      passedBest[course] = pts
-    }
-  }
-  const cgpa = Object.values(passedBest).length > 0
-    ? Object.values(passedBest).reduce((a, b) => a + b, 0) / Object.values(passedBest).length : 0
-  const roundedCgpa = Math.round(cgpa * 100) / 100
-  return {
-    program,
-    level1: { totalCredits, rows: [] },
-    level2: { cgpa: roundedCgpa, gpaCredits: totalCredits, standing: cgpa >= 2.0 ? 'NORMAL' : 'PROBATION' },
-    level3: { eligible: cgpa >= 2.0 && totalCredits >= 120, totalEarned: totalCredits, cgpa: roundedCgpa, totalRequired: 120, minCGPA: 2.0, missing: {}, advisories: [] },
-    graduation_status: cgpa >= 2.0 && totalCredits >= 120 ? 'PASS' : 'FAIL',
-    total_credits: totalCredits
-  }
-}
-
 type Mode = 'csv' | 'ocr'
 type OcrStep = 'idle' | 'extracting' | 'review' | 'editing' | 'auditing' | 'done'
 
@@ -93,6 +60,7 @@ export default function ScanPage() {
   const csvInputRef = useRef<HTMLInputElement>(null)
   const ocrInputRef = useRef<HTMLInputElement>(null)
   const [program, setProgram] = useState('')
+  const [programs, setPrograms] = useState(FALLBACK_PROGRAMS)
   const [mode, setMode] = useState<Mode>('csv')
 
   // CSV mode
@@ -109,52 +77,27 @@ export default function ScanPage() {
   const [ocrResult, setOcrResult] = useState<Record<string, unknown> | null>(null)
   const [ocrFile, setOcrFile] = useState<File | null>(null)
 
-  // ── Save to Supabase ──────────────────────────────────────────────────
-  async function saveToSupabase(courses: ParsedCourse[], csvText: string, auditResult: Record<string, unknown>) {
-    try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
+  useEffect(() => {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL
+    if (!apiUrl) return
 
-      // Save to transcript_scans
-      const { data: scan, error: scanError } = await supabase
-        .from('transcript_scans')
-        .insert({
-          user_id: user.id,
-          source_type: 'csv',
-          program: program,
-          parsed_data: courses,
-          audit_result: auditResult,
-          total_credits: auditResult.total_credits,
-          cgpa: (auditResult.level2 as { cgpa?: number })?.cgpa || 0,
-          graduation_status: auditResult.graduation_status,
-          verification_status: 'verified',
-          total_courses: courses.length,
-          verified_courses: courses.filter(c => !['F', 'W', 'I', 'X'].includes(c.grade)).length
-        })
-        .select()
-        .single()
+    fetch(`${apiUrl}/programs`)
+      .then(res => res.ok ? res.json() : Promise.reject(new Error('Failed to load programs')))
+      .then(data => {
+        if (Array.isArray(data.programs) && data.programs.length > 0) {
+          setPrograms(data.programs)
+        }
+      })
+      .catch(() => {
+        setPrograms(FALLBACK_PROGRAMS)
+      })
+  }, [])
 
-      if (scanError) {
-        console.error('Error saving scan:', scanError)
-        return
-      }
-
-      // Save verified courses
-      const verifiedCourses = courses.map(c => ({
-        scan_id: scan.id,
-        course_code: c.course,
-        course_name: c.courseName,
-        credits: c.credits,
-        grade: c.grade,
-        semester: c.semester,
-        verified: true,
-        is_manual: false
-      }))
-
-      await supabase.from('verified_courses').insert(verifiedCourses)
-    } catch (err) {
-      console.error('Error saving to Supabase:', err)
-    }
+  async function getAuthHeaders(): Promise<Record<string, string>> {
+    const { data: { session } } = await supabase.auth.getSession()
+    const token = session?.access_token
+    if (!token) throw new Error('Please log in again.')
+    return { Authorization: `Bearer ${token}` }
   }
 
   // ── CSV mode ──────────────────────────────────────────────────────────────
@@ -162,14 +105,26 @@ export default function ScanPage() {
     if (!program) { setCsvError('Please select your program first'); return }
     setCsvError(null); setCsvLoading(true)
     try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL
+      if (!apiUrl) {
+        throw new Error('NEXT_PUBLIC_API_URL is not set. Deploy the backend first.')
+      }
+
       const text = await file.text()
       setCsvText(text)
-      const result = runLocalAudit(text, program)
+
+      const authHeaders = await getAuthHeaders()
+      const res = await fetch(`${apiUrl}/audit/run_csv`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({ csv_text: text, program })
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }))
+        throw new Error(err.detail || 'Audit failed')
+      }
+      const result = await res.json()
       setCsvResult(result)
-      
-      // Save to Supabase
-      const courses = parseCSVToCourses(text)
-      await saveToSupabase(courses, text, result)
     } catch (e: unknown) {
       setCsvError(e instanceof Error ? e.message : String(e))
     } finally { setCsvLoading(false) }
@@ -190,8 +145,10 @@ export default function ScanPage() {
     try {
       const formData = new FormData()
       formData.append('file', file)
+      const authHeaders = await getAuthHeaders()
       const res = await fetch(`${apiUrl}/audit/extract`, {
         method: 'POST',
+        headers: authHeaders,
         body: formData,
         signal: AbortSignal.timeout(120000)
       })
@@ -226,9 +183,10 @@ export default function ScanPage() {
     setOcrStep('auditing'); setOcrError(null)
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL
+      const authHeaders = await getAuthHeaders()
       const res = await fetch(`${apiUrl}/audit/run_csv`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({ csv_text: extractedCsv, program })
       })
       if (!res.ok) {
@@ -237,10 +195,7 @@ export default function ScanPage() {
       }
       const data = await res.json()
       setOcrResult(data)
-      
-      // Save to Supabase
-      await saveToSupabase(extractedCourses, extractedCsv, data)
-      
+
       setOcrStep('done')
     } catch (e: unknown) {
       setOcrError(e instanceof Error ? e.message : String(e))
@@ -276,7 +231,7 @@ export default function ScanPage() {
             <select value={program} onChange={e => setProgram(e.target.value)}
               style={{ width: '100%', padding: '12px', fontSize: '1rem' }}>
               <option value="">-- Select your program --</option>
-              {PROGRAMS.map(p => <option key={p.code} value={p.code}>{p.name}</option>)}
+              {programs.map(p => <option key={p.code} value={p.code}>{p.name} ({p.code})</option>)}
             </select>
           </div>
 

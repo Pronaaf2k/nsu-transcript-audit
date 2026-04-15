@@ -30,6 +30,7 @@ def init_db():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS audits (
             id TEXT PRIMARY KEY,
+            user_id TEXT,
             created_at TEXT NOT NULL,
             program TEXT NOT NULL,
             csv_text TEXT,
@@ -40,6 +41,11 @@ def init_db():
             source_type TEXT DEFAULT 'csv'
         )
     """)
+
+    cursor.execute("PRAGMA table_info(audits)")
+    columns = [row[1] for row in cursor.fetchall()]
+    if "user_id" not in columns:
+        cursor.execute("ALTER TABLE audits ADD COLUMN user_id TEXT")
     
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS courses (
@@ -59,6 +65,7 @@ def init_db():
 
 
 def save_audit(
+    user_id: str,
     csv_text: str,
     program: str,
     result: dict[str, Any],
@@ -79,9 +86,9 @@ def save_audit(
     cursor = conn.cursor()
     
     cursor.execute("""
-        INSERT INTO audits (id, created_at, program, csv_text, total_credits, cgpa, graduation_status, result_json, source_type)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (audit_id, created_at, program, csv_text, total_credits, cgpa, status, result_json, source_type))
+        INSERT INTO audits (id, user_id, created_at, program, csv_text, total_credits, cgpa, graduation_status, result_json, source_type)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (audit_id, user_id, created_at, program, csv_text, total_credits, cgpa, status, result_json, source_type))
     
     # Save individual courses
     reader = csv.DictReader(io.StringIO(csv_text))
@@ -104,14 +111,14 @@ def save_audit(
     return audit_id
 
 
-def get_audit(audit_id: str) -> dict[str, Any] | None:
+def get_audit(audit_id: str, user_id: str) -> dict[str, Any] | None:
     """Get a single audit by ID."""
     init_db()
     
     conn = _get_db()
     cursor = conn.cursor()
     
-    cursor.execute("SELECT * FROM audits WHERE id = ?", (audit_id,))
+    cursor.execute("SELECT * FROM audits WHERE id = ? AND user_id = ?", (audit_id, user_id))
     row = cursor.fetchone()
     
     if not row:
@@ -131,7 +138,7 @@ def get_audit(audit_id: str) -> dict[str, Any] | None:
     return result
 
 
-def get_audit_history(limit: int = 20, program: str | None = None) -> list[dict[str, Any]]:
+def get_audit_history(user_id: str, limit: int = 20, program: str | None = None) -> list[dict[str, Any]]:
     """Get recent audits."""
     init_db()
     
@@ -142,17 +149,18 @@ def get_audit_history(limit: int = 20, program: str | None = None) -> list[dict[
         cursor.execute("""
             SELECT id, created_at, program, total_credits, cgpa, graduation_status, source_type
             FROM audits
-            WHERE program = ?
+            WHERE user_id = ? AND program = ?
             ORDER BY created_at DESC
             LIMIT ?
-        """, (program, limit))
+        """, (user_id, program, limit))
     else:
         cursor.execute("""
             SELECT id, created_at, program, total_credits, cgpa, graduation_status, source_type
             FROM audits
+            WHERE user_id = ?
             ORDER BY created_at DESC
             LIMIT ?
-        """, (limit,))
+        """, (user_id, limit))
     
     rows = [dict(r) for r in cursor.fetchall()]
     conn.close()
@@ -160,17 +168,20 @@ def get_audit_history(limit: int = 20, program: str | None = None) -> list[dict[
     return rows
 
 
-def delete_audit(audit_id: str) -> bool:
+def delete_audit(audit_id: str, user_id: str) -> bool:
     """Delete an audit and its courses."""
     init_db()
     
     conn = _get_db()
     cursor = conn.cursor()
     
-    cursor.execute("DELETE FROM courses WHERE audit_id = ?", (audit_id,))
-    cursor.execute("DELETE FROM audits WHERE id = ?", (audit_id,))
-    
-    deleted = cursor.rowcount > 0
+    cursor.execute("SELECT id FROM audits WHERE id = ? AND user_id = ?", (audit_id, user_id))
+    exists = cursor.fetchone() is not None
+    if exists:
+        cursor.execute("DELETE FROM courses WHERE audit_id = ?", (audit_id,))
+        cursor.execute("DELETE FROM audits WHERE id = ? AND user_id = ?", (audit_id, user_id))
+
+    deleted = exists
     conn.commit()
     conn.close()
     

@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from dotenv import load_dotenv
-from supabase import create_client, Client
+from supabase import create_client, Client, ClientOptions
 
 load_dotenv()
 
@@ -22,16 +22,21 @@ SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_ANON_KEY = os.environ["SUPABASE_ANON_KEY"]
 SESSION_FILE = Path.home() / ".nsu-audit" / "session.json"
 
+_captured_auth_code: str | None = None
 _captured_token: dict | None = None
 
 
 class _CallbackHandler(BaseHTTPRequestHandler):
     def do_GET(self):
+        global _captured_auth_code
         global _captured_token
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query)
 
-        # Supabase sends access_token + refresh_token as query params
+        if "code" in params:
+            _captured_auth_code = params["code"][0]
+
+        # Backward-compatible fallback if tokens are present in query params
         if "access_token" in params:
             _captured_token = {
                 "access_token": params["access_token"][0],
@@ -46,7 +51,11 @@ class _CallbackHandler(BaseHTTPRequestHandler):
 
 
 def get_client(require_auth: bool = True) -> Client:
-    supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+    supabase = create_client(
+        SUPABASE_URL,
+        SUPABASE_ANON_KEY,
+        options=ClientOptions(flow_type="pkce", persist_session=True, auto_refresh_token=True),
+    )
     if SESSION_FILE.exists():
         session = json.loads(SESSION_FILE.read_text())
         supabase.auth.set_session(session["access_token"], session["refresh_token"])
@@ -57,10 +66,16 @@ def get_client(require_auth: bool = True) -> Client:
 
 def login() -> None:
     """Open browser, capture OAuth callback, persist session."""
+    global _captured_auth_code
     global _captured_token
+    _captured_auth_code = None
     _captured_token = None
 
-    supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+    supabase = create_client(
+        SUPABASE_URL,
+        SUPABASE_ANON_KEY,
+        options=ClientOptions(flow_type="pkce", persist_session=True, auto_refresh_token=True),
+    )
     redirect_uri = "http://localhost:54320/callback"
     data = supabase.auth.sign_in_with_oauth(
         {"provider": "google", "options": {"redirect_to": redirect_uri}}
@@ -73,6 +88,25 @@ def login() -> None:
     webbrowser.open(data.url)
     thread.join(timeout=120)
     server.server_close()
+
+    if _captured_auth_code:
+        resp = supabase.auth.exchange_code_for_session(
+            {"auth_code": _captured_auth_code, "redirect_to": redirect_uri}
+        )
+        if resp and getattr(resp, "session", None):
+            sess = resp.session
+            _captured_token = {
+                "access_token": sess.access_token,
+                "refresh_token": sess.refresh_token,
+            }
+
+    if not _captured_token:
+        session = supabase.auth.get_session()
+        if session:
+            _captured_token = {
+                "access_token": session.access_token,
+                "refresh_token": session.refresh_token,
+            }
 
     if not _captured_token:
         raise RuntimeError("Login timed out or was cancelled.")

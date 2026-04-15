@@ -23,6 +23,7 @@ from packages.core.cgpa_engine import CGPAAuditor
 from packages.core.audit_engine import GraduationAuditor
 from packages.core.course_catalog import CourseCatalog
 from packages.core.pdf_parser import VisionParser
+from packages.core.program_knowledge import get_program_md_path, get_program_name
 
 # Import CLI audit modules for program.md based validation
 try:
@@ -31,15 +32,6 @@ try:
 except ImportError:
     HAS_CLI_AUDIT = False
 
-
-PROGRAM_MAP = {
-    "CSE": "Computer Science & Engineering",
-    "BBA": "Business Administration",
-    "ETE": "Electronic & Telecom Engineering",
-    "ENV": "Environmental Science & Management",
-    "ENG": "English",
-    "ECO": "Economics",
-}
 
 GRADE_POINTS = {
     'A': 4.0, 'A-': 3.7, 'B+': 3.3, 'B': 3.0, 'B-': 2.7,
@@ -159,9 +151,7 @@ class UnifiedAuditor:
         csv_text = csv_content.getvalue()
         
         # Find program.md
-        program_file = Path(__file__).parent.parent / "cli" / "program.md"
-        if not program_file.exists():
-            program_file = Path(__file__).parent.parent.parent / "program.md"
+        program_file = get_program_md_path()
         
         if not program_file.exists():
             return {
@@ -178,7 +168,7 @@ class UnifiedAuditor:
                 "error": "program.md not found"
             }
         
-        full_name = PROGRAM_MAP.get(program.upper(), program)
+        full_name = get_program_name(program)
         
         try:
             requirements = parse_program_knowledge(str(program_file), full_name)

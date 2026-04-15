@@ -8,8 +8,7 @@ import { createClient } from '@/lib/supabase/client'
 
 const NAV_ITEMS = [
     { href: '/dashboard', label: 'Dashboard', icon: '◈' },
-    { href: '/audit', label: 'Audit Engine', icon: '◉' },
-    { href: '/scan', label: 'New Scan', icon: '+' },
+    { href: '/scan', label: 'Scan & Audit', icon: '◉' },
 ]
 
 type WakeStatus = 'idle' | 'waking' | 'awake' | 'error'

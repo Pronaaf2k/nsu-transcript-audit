@@ -15,7 +15,7 @@ from auth import get_client
 
 console = Console()
 
-SUPABASE_URL = os.environ["SUPABASE_URL"]
+API_URL = os.environ.get("NEXT_PUBLIC_API_URL") or os.environ.get("GRADGATE_API_URL") or "http://localhost:8000"
 
 
 def scan(file_path: str, program: str) -> None:
@@ -27,35 +27,39 @@ def scan(file_path: str, program: str) -> None:
     supabase = get_client()
     session = supabase.auth.get_session()
     token = session.access_token
-    user_id = supabase.auth.get_user().user.id
 
     console.print(f"[cyan]Uploading[/cyan] {path.name}…")
 
-    if path.suffix.lower() == ".csv":
-        body = {"csv_text": path.read_text(), "program": program, "file_name": path.name}
-    else:
-        storage_path = f"{user_id}/{path.name}"
-        supabase.storage.from_("transcripts").upload(storage_path, path.read_bytes(), {"upsert": "true"})
-        body = {
-            "storage_path": storage_path,
-            "source_type": "pdf" if path.suffix.lower() == ".pdf" else "image",
-            "program": program,
-            "file_name": path.name,
-        }
-
     console.print("[cyan]Running audit…[/cyan]")
-    res = httpx.post(
-        f"{SUPABASE_URL}/functions/v1/process-transcript",
-        json=body,
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=60,
-    )
+    headers = {"Authorization": f"Bearer {token}"}
+
+    if path.suffix.lower() == ".csv":
+        res = httpx.post(
+            f"{API_URL.rstrip('/')}/audit/run_csv",
+            json={"csv_text": path.read_text(encoding="utf-8"), "program": program},
+            headers={**headers, "Content-Type": "application/json"},
+            timeout=60,
+        )
+    else:
+        with path.open("rb") as f:
+            files = {
+                "file": (path.name, f, "application/octet-stream"),
+            }
+            data = {"program": program}
+            res = httpx.post(
+                f"{API_URL.rstrip('/')}/audit/image",
+                files=files,
+                data=data,
+                headers=headers,
+                timeout=120,
+            )
+
     data = res.json()
     if not res.is_success:
-        console.print(f"[red]Error:[/red] {data.get('error', res.text)}")
+        console.print(f"[red]Error:[/red] {data.get('detail', res.text)}")
         raise SystemExit(1)
 
-    _print_result(data["scan"])
+    _print_result(data)
 
 
 def _print_result(scan: dict) -> None:

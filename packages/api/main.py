@@ -33,9 +33,16 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile, Body
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from packages.api.auth import CurrentUser
+
+from packages.core.program_knowledge import (
+    get_program_requirements,
+    list_supported_programs,
+    normalize_program_code,
+)
 
 
 
@@ -50,17 +57,6 @@ except ImportError:
     pass
 
 AUDIT_SRC = Path(__file__).parent.parent / "core"
-
-# ── Security ───────────────────────────────────────────────────────────────────
-API_KEY = os.environ.get("AUDIT_API_KEY", "")
-
-
-def _check_key(authorization: str | None):
-    if not API_KEY:
-        return  # dev mode — no key required
-    if authorization != f"Bearer {API_KEY}":
-        raise HTTPException(status_code=401, detail="Invalid API key")
-
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="NSU Audit API", version="1.0.0")
@@ -108,7 +104,7 @@ def _courses_to_csv(courses: list[dict[str, Any]]) -> str:
     return buf.getvalue()
 
 
-def _run_audit(csv_text: str, program: str, concentration: str | None = None) -> dict[str, Any]:
+def _run_audit(csv_text: str, program: str, user_id: str, concentration: str | None = None) -> dict[str, Any]:
     """Parse csv_text, run the Unified Auditor from GradTrace, return legacy + new results."""
     from packages.core.unified import UnifiedAuditor
 
@@ -165,7 +161,7 @@ def _run_audit(csv_text: str, program: str, concentration: str | None = None) ->
     
     # Save to local SQLite database (always works)
     try:
-        audit_id = save_audit(csv_text, program, legacy, source_type="csv")
+        audit_id = save_audit(user_id, csv_text, program, legacy, source_type="csv")
         legacy["id"] = audit_id
     except Exception as e:
         print(f"Warning: Failed to save locally: {e}")
@@ -209,24 +205,42 @@ class AuditRequest(BaseModel):
 
 @app.get("/health")
 def health():
-    version = "not installed"
-    if TESSERACT_OK:
-        try:
-            version = pytesseract.get_tesseract_version().to_str()  # type: ignore[attr-defined]
-        except Exception:
-            version = "installed"
-    return {"status": "ok", "tesseract": version}
+    return {
+        "status": "ok",
+        "ocr": "gemini",
+        "gemini_configured": bool(os.environ.get("GEMINI_API_KEY")),
+    }
+
+
+@app.get("/programs")
+def get_programs():
+    """
+    List available programs from canonical program.md-backed config.
+    """
+    return {"programs": list_supported_programs()}
+
+
+@app.get("/programs/{program_code}")
+def get_program(program_code: str):
+    """
+    Return full requirement payload for a single program.
+    """
+    try:
+        return get_program_requirements(program_code)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"Program not found: {program_code}")
 
 
 @app.post("/audit/extract")
 async def audit_extract(
+    current_user: CurrentUser,
     file: UploadFile = File(...),
-    authorization: str | None = Header(default=None),
 ):
     """
     Extract course rows from a PDF or image, returning raw CSV string for user review.
     """
-    _check_key(authorization)
     file_bytes = await file.read()
     try:
         csv_text = _parse_bytes_with_gemini(file_bytes, file.filename or "transcript.pdf")
@@ -242,13 +256,13 @@ async def audit_extract(
 
 @app.post("/audit")
 def audit_json(
+    current_user: CurrentUser,
     body: AuditRequest,
-    authorization: str | None = Header(default=None),
 ):
-    _check_key(authorization)
+    program = normalize_program_code(body.program)
     csv_text = _courses_to_csv(body.courses)
     try:
-        return _run_audit(csv_text, body.program)
+        return _run_audit(csv_text, program, current_user)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -258,45 +272,45 @@ class AuditCsvRequest(BaseModel):
 
 @app.post("/audit/run_csv")
 def audit_run_csv(
+    current_user: CurrentUser,
     body: AuditCsvRequest,
-    authorization: str | None = Header(default=None),
 ):
     """
     Receives raw CSV string (after user edits) and runs the audit.
     """
-    _check_key(authorization)
+    program = normalize_program_code(body.program)
     try:
-        return _run_audit(body.csv_text, body.program)
+        return _run_audit(body.csv_text, program, current_user)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/audit/csv")
 async def audit_csv(
+    current_user: CurrentUser,
     file: UploadFile = File(...),
     program: str = Form(...),
-    authorization: str | None = Header(default=None),
 ):
-    _check_key(authorization)
+    program = normalize_program_code(program)
     raw = await file.read()
     csv_text = raw.decode("utf-8-sig")
     try:
-        return _run_audit(csv_text, program)
+        return _run_audit(csv_text, program, current_user)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/audit/image")
 async def audit_image(
+    current_user: CurrentUser,
     file: UploadFile = File(...),
     program: str = Form(...),
-    authorization: str | None = Header(default=None),
 ):
     """
     Upload a transcript image or PDF.
     Tesseract extracts course data, then runs the full L1/L2/L3 audit.
     """
-    _check_key(authorization)
+    program = normalize_program_code(program)
     file_bytes = await file.read()
     try:
         csv_text = _parse_bytes_with_gemini(file_bytes, file.filename or "transcript.pdf")
@@ -306,7 +320,7 @@ async def audit_image(
                 detail="Gemini LLM could not extract any course data from this file. "
                        "Ensure the image is a valid academic transcript.",
             )
-        result = _run_audit(csv_text, program)
+        result = _run_audit(csv_text, program, current_user)
         result["raw_ocr"] = "Parsed natively using Gemini 2.5 Flash."
         return result
     except HTTPException:
@@ -319,32 +333,30 @@ async def audit_image(
 
 @app.get("/history")
 def get_history(
+    current_user: CurrentUser,
     limit: int = 20,
     program: str | None = None,
-    authorization: str | None = Header(default=None),
 ):
     """
     Get audit history.
     GET /history?limit=20&program=CSE
     """
-    _check_key(authorization)
     try:
-        return get_audit_history(limit=limit, program=program)
+        return get_audit_history(current_user, limit=limit, program=program)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/history/{audit_id}")
 def get_audit_by_id(
+    current_user: CurrentUser,
     audit_id: str,
-    authorization: str | None = Header(default=None),
 ):
     """
     Get a specific audit by ID.
     """
-    _check_key(authorization)
     try:
-        result = get_audit(audit_id)
+        result = get_audit(audit_id, current_user)
         if not result:
             raise HTTPException(status_code=404, detail="Audit not found")
         return result
@@ -356,15 +368,14 @@ def get_audit_by_id(
 
 @app.delete("/history/{audit_id}")
 def delete_audit_by_id(
+    current_user: CurrentUser,
     audit_id: str,
-    authorization: str | None = Header(default=None),
 ):
     """
     Delete a specific audit by ID.
     """
-    _check_key(authorization)
     try:
-        deleted = delete_audit(audit_id)
+        deleted = delete_audit(audit_id, current_user)
         if not deleted:
             raise HTTPException(status_code=404, detail="Audit not found")
         return {"deleted": True, "id": audit_id}
