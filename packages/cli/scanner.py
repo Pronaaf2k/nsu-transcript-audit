@@ -18,10 +18,18 @@ console = Console()
 API_URL = os.environ.get("NEXT_PUBLIC_API_URL") or os.environ.get("GRADGATE_API_URL") or "http://localhost:8000"
 
 
-def scan(file_path: str, program: str) -> None:
+def scan(file_path: str, program: str, audit_level: int = 3) -> None:
+    file_path = (file_path or "").strip()
+    if not file_path:
+        console.print("[red]Transcript path is required.[/red]")
+        raise SystemExit(1)
+
     path = Path(file_path)
     if not path.exists():
         console.print(f"[red]File not found:[/red] {file_path}")
+        raise SystemExit(1)
+    if not path.is_file():
+        console.print(f"[red]Path is not a file:[/red] {file_path}")
         raise SystemExit(1)
 
     supabase = get_client()
@@ -36,7 +44,7 @@ def scan(file_path: str, program: str) -> None:
     if path.suffix.lower() == ".csv":
         res = httpx.post(
             f"{API_URL.rstrip('/')}/audit/run_csv",
-            json={"csv_text": path.read_text(encoding="utf-8"), "program": program},
+            json={"csv_text": path.read_text(encoding="utf-8"), "program": program, "audit_level": audit_level},
             headers={**headers, "Content-Type": "application/json"},
             timeout=60,
         )
@@ -46,6 +54,7 @@ def scan(file_path: str, program: str) -> None:
                 "file": (path.name, f, "application/octet-stream"),
             }
             data = {"program": program}
+            data["audit_level"] = str(audit_level)
             res = httpx.post(
                 f"{API_URL.rstrip('/')}/audit/image",
                 files=files,

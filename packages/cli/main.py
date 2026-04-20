@@ -7,6 +7,8 @@ from __future__ import annotations
 import os
 import sys
 import argparse
+import json
+import base64
 from pathlib import Path
 
 # Allow sibling imports regardless of cwd
@@ -21,8 +23,6 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.table import Table
-
-import audit
 
 app = typer.Typer(
     name="nsu-audit",
@@ -50,20 +50,43 @@ def _session_status_text() -> str:
     return "[green]Logged in[/green]" if SESSION_FILE.exists() else "[yellow]Not logged in[/yellow]"
 
 
+def _session_email() -> str | None:
+    if not SESSION_FILE.exists():
+        return None
+    try:
+        session = json.loads(SESSION_FILE.read_text())
+        token = session.get("access_token", "")
+        parts = token.split(".")
+        if len(parts) < 2:
+            return None
+        payload = parts[1]
+        padding = "=" * (-len(payload) % 4)
+        decoded = base64.urlsafe_b64decode(payload + padding).decode("utf-8")
+        claims = json.loads(decoded)
+        return claims.get("email")
+    except Exception:
+        return None
+
+
 def _draw_menu() -> None:
     console.clear()
     console.print(Panel("[bold cyan]NSU Transcript Audit[/bold cyan]\nSingle place for login, scan, audit, and history", border_style="cyan"))
+    logged_in = SESSION_FILE.exists()
     console.print(f"Session: {_session_status_text()}\n")
+    if logged_in:
+        email = _session_email() or "unknown user"
+        console.print(f"Account: [cyan]{email}[/cyan]\n")
 
     table = Table(show_header=True, header_style="bold")
     table.add_column("Option", style="cyan", width=8)
     table.add_column("Action", style="white")
-    table.add_row("1", "Login with Google")
-    table.add_row("2", "Scan transcript (upload + audit)")
-    table.add_row("3", "Run local CSV audit (L1/L2/L3/full)")
-    table.add_row("4", "View scan history")
-    table.add_row("5", "View scan report by ID")
-    table.add_row("6", "Logout")
+    if logged_in:
+        table.add_row("1", "Scan transcript (audit L1/L2/L3)")
+        table.add_row("2", "Run CSV audit (L1/L2/L3 + saved)")
+        table.add_row("3", "View scan history (online scans)")
+        table.add_row("4", "Logout")
+    else:
+        table.add_row("1", "Login with Google")
     table.add_row("0", "Exit")
     console.print(table)
 
@@ -71,29 +94,29 @@ def _draw_menu() -> None:
 def _menu_loop() -> None:
     while True:
         _draw_menu()
-        choice = Prompt.ask("Choose an option", choices=["1", "2", "3", "4", "5", "6", "0"], default="2")
+        logged_in = SESSION_FILE.exists()
+        choices = ["1", "2", "3", "4", "0"] if logged_in else ["1", "0"]
+        default_choice = "1"
+        choice = Prompt.ask("Choose an option", choices=choices, default=default_choice)
 
         try:
-            if choice == "1":
+            if choice == "1" and not logged_in:
                 login()
-            elif choice == "2":
+            elif choice == "1" and logged_in:
                 file_path = Prompt.ask("Transcript path (PDF/JPG/PNG/CSV)").strip()
                 program = _prompt_program()
-                scan(file_path, program)
-            elif choice == "3":
+                level = int(Prompt.ask("Audit level", choices=["1", "2", "3"], default="3"))
+                scan(file_path, program, level)
+            elif choice == "2" and logged_in:
                 transcript = Prompt.ask("CSV transcript path").strip()
-                level = Prompt.ask("Audit level", choices=["1", "2", "3", "full"], default="3")
                 program = _prompt_program()
-                waivers = Prompt.ask("Waivers (comma-separated, optional)", default="").strip()
-                audit(transcript=transcript, level=level, program=program, waivers=waivers)
-            elif choice == "4":
+                level = int(Prompt.ask("Audit level", choices=["1", "2", "3"], default="3"))
+                scan(transcript, program, level)
+            elif choice == "3" and logged_in:
                 limit_str = Prompt.ask("History rows", default="20")
                 limit = int(limit_str) if limit_str.isdigit() else 20
                 history(limit=limit)
-            elif choice == "5":
-                scan_id = Prompt.ask("Scan ID").strip()
-                report(scan_id)
-            elif choice == "6":
+            elif choice == "4" and logged_in:
                 logout()
             else:
                 console.print("[cyan]Goodbye.[/cyan]")
@@ -140,10 +163,11 @@ def logout():
 def scan(
     file: str = typer.Argument(..., help="Path to transcript (PDF, JPG, PNG, CSV)"),
     program: str = typer.Option("CSE", "--program", "-p", help="Degree program code"),
+    level: int = typer.Option(3, "--level", "-l", min=1, max=3, help="Audit level (1, 2, 3)"),
 ):
     """Upload a transcript and run the graduation audit."""
     import scanner as scanner_module
-    scanner_module.scan(file, program)
+    scanner_module.scan(file, program, level)
 
 
 @app.command()
@@ -164,40 +188,17 @@ def report(
     history_module.show_report(scan_id)
 
 
-@app.command()
-def audit(
+@app.command("audit")
+def audit_command(
     transcript: str = typer.Argument(..., help="Path to transcript CSV file"),
-    level: str = typer.Option("3", "--level", "-l", help="Audit level (1, 2, 3, or full)"),
+    level: int = typer.Option(3, "--level", "-l", min=1, max=3, help="Audit level (1, 2, 3)"),
     program: str = typer.Option("CSE", "--program", "-p", help="Program code (CSE, BBA, ETE, ENV, ENG, ECO)"),
-    waivers: str = typer.Option("", "--waivers", "-w", help="Comma-separated course codes to waive"),
+    waivers: str = typer.Option("", "--waivers", "-w", help="Ignored"),
 ):
-    """Run L1/L2/L3 audit on a transcript CSV file."""
-    program_file = os.path.join(os.path.dirname(__file__), "program.md")
-    
-    if not os.path.exists(transcript):
-        console.print(f"[red]Error: File not found: {transcript}[/red]")
-        raise typer.Exit(1)
-    
-    waiver_list = [w.strip() for w in waivers.split(',') if w.strip()] if waivers else None
-    level = str(level).strip().lower()
-    
-    try:
-        if level == "1":
-            from audit.audit_l1 import calculate_credits
-            calculate_credits(transcript)
-        elif level == "2":
-            from audit.audit_l2 import calculate_cgpa
-            calculate_cgpa(transcript, waivers=waiver_list)
-        elif level == "3":
-            audit.run_level3(transcript, program, program_file)
-        elif level == 'full':
-            audit.run_full(transcript, program, program_file, waiver_list)
-        else:
-            console.print(f"[red]Error: Invalid level. Use 1, 2, 3, or 'full'.[/red]")
-            raise typer.Exit(1)
-    except Exception as e:
-        console.print(f"[red]Error:[/red] {e}")
-        raise typer.Exit(1)
+    """Run CSV audit via backend so result is stored in history."""
+    if waivers.strip():
+        console.print("[yellow]Note:[/yellow] --waivers is ignored.")
+    scan(transcript, program, level)
 
 
 if __name__ == "__main__":

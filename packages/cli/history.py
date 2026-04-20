@@ -31,7 +31,8 @@ def list_history(limit: int = 20) -> None:
     scans = res.json() or []
 
     if not scans:
-        console.print("[yellow]No scans found.[/yellow]")
+        console.print("[yellow]No transcript checked yet.[/yellow]")
+        console.print("[dim]Run option 1 or 2 to create your first audit record.[/dim]")
         return
 
     t = Table(title="Scan History", border_style="dim")

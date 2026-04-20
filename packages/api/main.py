@@ -103,7 +103,13 @@ def _courses_to_csv(courses: list[dict[str, Any]]) -> str:
     return buf.getvalue()
 
 
-def _run_audit(csv_text: str, program: str, user_id: str, concentration: str | None = None) -> dict[str, Any]:
+def _run_audit(
+    csv_text: str,
+    program: str,
+    user_id: str,
+    concentration: str | None = None,
+    audit_level: int = 3,
+) -> dict[str, Any]:
     """Parse csv_text, run the Unified Auditor from GradTrace, return legacy + new results."""
     from packages.core.unified import UnifiedAuditor
 
@@ -129,7 +135,7 @@ def _run_audit(csv_text: str, program: str, user_id: str, concentration: str | N
     total_cr = result.get("level_1", {}).get("credits_earned", 0) if result.get("level_1") else 0
     cgpa = result.get("level_2", {}).get("cgpa", 0.0) if result.get("level_2") else 0.0
 
-    legacy = {
+    legacy_full = {
         "audit_result": {
             "l1": {
                 "total_credits": total_cr,
@@ -151,12 +157,46 @@ def _run_audit(csv_text: str, program: str, user_id: str, concentration: str | N
         "cgpa": cgpa,
         "graduation_status": "PASS" if eligible else "FAIL",
     }
+
+    level = max(1, min(3, int(audit_level)))
+    if level == 1:
+        legacy = {
+            "audit_result": {
+                "l1": legacy_full["audit_result"]["l1"],
+                "graduation_status": "PENDING",
+                "gradtrace": {"level_1": result.get("level_1")},
+            },
+            "program": program,
+            "total_credits": total_cr,
+            "cgpa": None,
+            "graduation_status": "PENDING",
+            "audit_level": 1,
+        }
+    elif level == 2:
+        legacy = {
+            "audit_result": {
+                "l1": legacy_full["audit_result"]["l1"],
+                "l2": legacy_full["audit_result"]["l2"],
+                "graduation_status": "PENDING",
+                "gradtrace": {
+                    "level_1": result.get("level_1"),
+                    "level_2": result.get("level_2"),
+                },
+            },
+            "program": program,
+            "total_credits": total_cr,
+            "cgpa": cgpa,
+            "graduation_status": "PENDING",
+            "audit_level": 2,
+        }
+    else:
+        legacy = {**legacy_full, "audit_level": 3}
     
     # Save to PostgreSQL (optional - only if Supabase is configured)
     try:
-        save_transcript_and_audit(csv_text, program, 3, legacy)
-    except Exception:
-        pass  # Supabase not configured, continue without saving
+        save_transcript_and_audit(csv_text, program, level, legacy, student_id=user_id)
+    except Exception as e:
+        print(f"Warning: Failed to save to Supabase: {e}")
     
     # Save to local SQLite database (always works)
     try:
@@ -268,6 +308,7 @@ def audit_json(
 class AuditCsvRequest(BaseModel):
     csv_text: str
     program: str
+    audit_level: int = 3
 
 @app.post("/audit/run_csv")
 def audit_run_csv(
@@ -279,7 +320,7 @@ def audit_run_csv(
     """
     program = normalize_program_code(body.program)
     try:
-        return _run_audit(body.csv_text, program, current_user)
+        return _run_audit(body.csv_text, program, current_user, audit_level=body.audit_level)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -289,12 +330,13 @@ async def audit_csv(
     current_user: CurrentUser,
     file: UploadFile = File(...),
     program: str = Form(...),
+    audit_level: int = Form(3),
 ):
     program = normalize_program_code(program)
     raw = await file.read()
     csv_text = raw.decode("utf-8-sig")
     try:
-        return _run_audit(csv_text, program, current_user)
+        return _run_audit(csv_text, program, current_user, audit_level=audit_level)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -304,6 +346,7 @@ async def audit_image(
     current_user: CurrentUser,
     file: UploadFile = File(...),
     program: str = Form(...),
+    audit_level: int = Form(3),
 ):
     """
     Upload a transcript image or PDF.
@@ -319,7 +362,7 @@ async def audit_image(
                 detail="Gemini LLM could not extract any course data from this file. "
                        "Ensure the image is a valid academic transcript.",
             )
-        result = _run_audit(csv_text, program, current_user)
+        result = _run_audit(csv_text, program, current_user, audit_level=audit_level)
         result["raw_ocr"] = "Parsed natively using Gemini 2.5 Flash."
         return result
     except HTTPException:

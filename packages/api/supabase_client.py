@@ -78,10 +78,13 @@ def save_transcript_and_audit(
             "audit_result": audit_result
         }
 
-        resp = requests.post(_table_url("transcript_scans"), headers=HEADERS, json=scan_data)
+        resp = requests.post(_table_url("transcript_scans"), headers=HEADERS, json=scan_data, timeout=15)
         if resp.status_code in (200, 201):
             result = resp.json()
-            scan_id = result.get("id")
+            if isinstance(result, list):
+                scan_id = result[0].get("id") if result else None
+            elif isinstance(result, dict):
+                scan_id = result.get("id")
         else:
             print(f"Failed to save transcript scan: {resp.status_code} {resp.text}")
 
@@ -99,7 +102,7 @@ def save_transcript_and_audit(
             "result_json": audit_result
         }
 
-        resp = requests.post(_table_url("audit_results"), headers=HEADERS, json=audit_data)
+        resp = requests.post(_table_url("audit_results"), headers=HEADERS, json=audit_data, timeout=15)
         if resp.status_code in (200, 201):
             print(f"Audit saved to Supabase successfully")
         else:

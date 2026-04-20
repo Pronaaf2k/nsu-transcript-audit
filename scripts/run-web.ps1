@@ -3,7 +3,6 @@ $ErrorActionPreference = 'Stop'
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $apiDir = Join-Path $root 'packages/api'
-$venvPython = Join-Path $root 'packages/cli/.venv/Scripts/python.exe'
 $apiPython = Join-Path $apiDir '.venv/Scripts/python.exe'
 $apiUrl = 'http://127.0.0.1:8000/health'
 
@@ -15,11 +14,6 @@ function Test-ApiUp {
   catch {
     return $false
   }
-}
-
-if (-not (Test-Path $venvPython)) {
-  Write-Host "Missing packages/cli/.venv. Run 'pnpm setup:local' first." -ForegroundColor Red
-  exit 1
 }
 
 $mutexName = 'Global\nsu-transcript-audit-api-startup'
@@ -72,10 +66,5 @@ finally {
   $startupMutex.Dispose()
 }
 
-Push-Location (Join-Path $root 'packages/cli')
-try {
-  & "$venvPython" main.py @args
-}
-finally {
-  Pop-Location
-}
+Set-Location $root
+pnpm --filter web dev

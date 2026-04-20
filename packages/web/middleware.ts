@@ -28,7 +28,7 @@ export async function middleware(request: NextRequest) {
 
     // Redirect unauthenticated users to /login
     const url = request.nextUrl.clone()
-    const isProtected = ['/dashboard', '/scan', '/report'].some(p =>
+    const isProtected = ['/dashboard', '/scan', '/report', '/audit'].some(p =>
         url.pathname.startsWith(p)
     )
 
@@ -38,7 +38,7 @@ export async function middleware(request: NextRequest) {
     }
 
     if (user && url.pathname === '/login') {
-        url.pathname = '/dashboard'
+        url.pathname = '/scan'
         return NextResponse.redirect(url)
     }
 
