@@ -7,6 +7,10 @@ node_modules/
 packages/web/.next/
 web/.next/
 web/out/
+*.tsbuildinfo
+
+# Expo / React Native
+packages/mobile/.expo/
 
 # Python
 __pycache__/

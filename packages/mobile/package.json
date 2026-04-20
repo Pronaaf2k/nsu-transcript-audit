@@ -3,12 +3,13 @@
     "version": "1.0.0",
     "main": "expo-router/entry",
     "scripts": {
-        "start": "expo start",
-        "android": "expo run:android",
-        "ios": "expo run:ios",
+        "start": "node ../../scripts/check-mobile-node.cjs && expo start",
+        "android": "node ../../scripts/check-mobile-node.cjs && expo run:android",
+        "ios": "node ../../scripts/check-mobile-node.cjs && expo run:ios",
         "lint": "eslint ."
     },
     "dependencies": {
+        "@react-native-async-storage/async-storage": "^1.23.1",
         "@expo/vector-icons": "^14.0.0",
         "@react-navigation/native": "^6.0.0",
         "@supabase/supabase-js": "^2.39.0",
@@ -27,6 +28,7 @@
     },
     "devDependencies": {
         "@babel/core": "^7.20.0",
+        "@types/node": "^20.19.9",
         "@types/react": "~18.2.45",
         "typescript": "^5.1.3"
     }

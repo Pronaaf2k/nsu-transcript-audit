@@ -1,7 +1,5 @@
 import { useEffect, useState } from 'react'
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator } from 'react-native'
-import { useRouter } from 'expo-router'
-import { useLocalSearchParams } from 'expo-router'
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? ''
 
@@ -15,8 +13,6 @@ interface FeedbackData {
 }
 
 export default function ReportScreen() {
-    const { id } = useLocalSearchParams()
-    const router = useRouter()
     const [feedback, setFeedback] = useState<FeedbackData[]>([])
     const [loading, setLoading] = useState(true)
 
@@ -64,7 +60,7 @@ export default function ReportScreen() {
     const maxCat = Math.max(...categoryCounts, 1)
 
     const features = [...new Set(feedback.map(f => f.feature_used))]
-    const featureCounts = features.map(f => feedback.filter(f => f.feature_used === f).length)
+    const featureCounts = features.map(feature => feedback.filter(f => f.feature_used === feature).length)
     const maxFeat = Math.max(...featureCounts, 1)
 
     const avgRating = (feedback.reduce((sum, f) => sum + f.rating, 0) / feedback.length).toFixed(1)
