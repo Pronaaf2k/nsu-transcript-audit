@@ -130,6 +130,50 @@ class CourseCatalog:
 
     BBA_ALL_CORE = {**BBA_SCHOOL_CORE, **BBA_CORE}
 
+    # Legacy BBA curriculum (pre-Spring 2014)
+    BBA_OLD_TOTAL_CREDITS = 120
+    BBA_OLD_MIN_CGPA = 2.0
+    BBA_OLD_CORE_CGPA = 2.0
+
+    BBA_OLD_GED_REQUIRED = {
+        "ENG102": 3,
+        "ENG103": 3,
+        "HIS103": 3,
+        "PHI101": 3,
+        "BEN205": 3,
+        "ENV203": 3,
+        "PSY101": 3,
+    }
+
+    BBA_OLD_CORE_BUSINESS = {
+        "ACT201": 3,
+        "ACT202": 3,
+        "BUS172": 3,
+        "ECO101": 3,
+        "ECO104": 3,
+        "FIN254": 3,
+        "MGT210": 3,
+        "MGT314": 3,
+        "MGT368": 3,
+        "MKT202": 3,
+        "MIS205": 3,
+        "LAW200": 3,
+    }
+
+    BBA_OLD_MAJOR_CORE = {
+        "BUS101": 3,
+        "BUS112": 3,
+        "BUS134": 3,
+        "BUS251": 3,
+        "BUS401": 3,
+        "BUS498": 4,
+        "MGT321": 3,
+        "MGT489": 3,
+        "QM212": 3,
+    }
+
+    BBA_OLD_ALL_CORE = {**BBA_OLD_CORE_BUSINESS, **BBA_OLD_MAJOR_CORE}
+
     # ═══════════════════════════════════════════════════
     # BBA CONCENTRATIONS (18cr each: 4 required + 2 elective)
     # ═══════════════════════════════════════════════════

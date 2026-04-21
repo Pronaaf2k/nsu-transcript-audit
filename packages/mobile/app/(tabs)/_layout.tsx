@@ -13,33 +13,25 @@ export default function TabLayout() {
             }}
         >
             <Tabs.Screen
-                name="index"
+                name="scan"
                 options={{
-                    title: 'Dashboard',
-                    tabBarIcon: ({ color, size }) => <Ionicons name="grid-outline" size={size} color={color} />,
+                    title: 'Audit',
+                    tabBarIcon: ({ color, size }) => <Ionicons name="scan-outline" size={size} color={color} />,
                 }}
             />
             <Tabs.Screen
-                name="scan"
+                name="index"
                 options={{
-                    title: 'Scan',
-                    tabBarIcon: ({ color, size }) => <Ionicons name="scan-outline" size={size} color={color} />,
+                    href: null,
                 }}
             />
             <Tabs.Screen
                 name="report"
                 options={{
-                    title: 'Report',
-                    tabBarIcon: ({ color, size }) => <Ionicons name="document-text-outline" size={size} color={color} />,
+                    href: null,
                 }}
             />
-            <Tabs.Screen
-                name="feedback"
-                options={{
-                    title: 'Feedback',
-                    tabBarIcon: ({ color, size }) => <Ionicons name="chatbubble-outline" size={size} color={color} />,
-                }}
-            />
+            <Tabs.Screen name="feedback" options={{ href: null }} />
         </Tabs>
     )
 }

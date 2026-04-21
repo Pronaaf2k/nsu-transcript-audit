@@ -75,6 +75,8 @@ This starts:
 - Web app: `http://localhost:3000`
 - API docs: `http://localhost:8000/docs`
 
+Important: this repo now uses a single root `.env` for local runs (`pnpm cli`, `pnpm web`, `pnpm dev:mobile`, `pnpm dev:local`).
+
 Run CLI from repo root:
 
 ```powershell
@@ -120,20 +122,25 @@ pip install -r requirements.txt
 py main.py --help
 ```
 
-5. **Environment Variables**
+5. **Environment Variables (single file)**
 
-Frontend (`packages/web/.env.local`):
+Create one file at repo root: `.env`
+
 ```
+SUPABASE_URL=your_supabase_url
+SUPABASE_ANON_KEY=your_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_service_key
+SUPABASE_JWT_SECRET=your_jwt_secret_if_hs256
+
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
-NEXT_PUBLIC_API_URL=http://localhost:8000
-```
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
+EXPO_PUBLIC_API_URL=http://127.0.0.1:8000
+EXPO_PUBLIC_SUPABASE_URL=your_supabase_url
+EXPO_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+GRADGATE_API_URL=http://127.0.0.1:8000
 
-Backend (`packages/api/.env`):
-```
 GEMINI_API_KEY=your_gemini_key
-SUPABASE_URL=your_supabase_url
-SUPABASE_SERVICE_ROLE_KEY=your_service_key
 ```
 
 ## API Endpoints

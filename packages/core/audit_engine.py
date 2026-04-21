@@ -8,6 +8,7 @@ Ported from engine/audit_engine.py — algorithms unchanged.
 """
 
 import collections
+import re
 
 from packages.core.models import CourseRecord, SEMESTERS
 from packages.core.cgpa_engine import CGPAAuditor
@@ -240,12 +241,76 @@ class GraduationAuditor:
     # ───────────────────────────────────────────────
 
     @staticmethod
+    def _semester_to_order(semester: str) -> tuple[int, int]:
+        sem = (semester or "").strip()
+        m = re.match(r"(Spring|Summer|Fall)[\s-]*(\d{4})", sem, re.IGNORECASE)
+        if not m:
+            m2 = re.match(r"(Spring|Summer|Fall)(\d{4})", sem, re.IGNORECASE)
+            if not m2:
+                return (9999, 9)
+            term = m2.group(1).title()
+            year = int(m2.group(2))
+        else:
+            term = m.group(1).title()
+            year = int(m.group(2))
+
+        term_order = {"Spring": 1, "Summer": 2, "Fall": 3}.get(term, 9)
+        return (year, term_order)
+
+    @staticmethod
+    def _is_legacy_bba(records: list[CourseRecord]) -> bool:
+        """Legacy BBA applies for cohorts before Spring 2014."""
+        if not records:
+            return False
+        start = min((GraduationAuditor._semester_to_order(r.semester) for r in records), default=(9999, 9))
+        # Spring 2014 and later -> modern curriculum 143+
+        return start < (2014, 1)
+
+    @staticmethod
     def _audit_bba(records: list[CourseRecord], waivers: dict,
                    credits_earned: int, cgpa: float,
-                   credit_reduction: int = 0, concentration: str | None = None) -> dict:
+                   credit_reduction: int = 0, concentration: str | None = None,
+                   legacy_mode: bool = False) -> dict:
         """Perform BBA program audit — Curriculum 143+."""
         C = CourseCatalog
         passed = GraduationAuditor._get_passed_courses(records)
+
+        if legacy_mode:
+            remaining = {}
+            reasons = []
+            total_required = C.BBA_OLD_TOTAL_CREDITS - credit_reduction
+
+            # For legacy curriculum, do not hard-fail on strict modern-style
+            # bucket matching (old transcript codes vary widely).
+            # Keep graduation decision primarily on credits + CGPA + core CGPA.
+
+            core_codes = list(C.BBA_OLD_ALL_CORE.keys())
+            core_cgpa = CGPAAuditor.compute_major_cgpa(records, core_codes)
+
+            eligible = True
+            if credits_earned < total_required:
+                eligible = False
+                reasons.append(f"Credits earned ({credits_earned}) < {total_required} required")
+            if cgpa < C.BBA_OLD_MIN_CGPA:
+                eligible = False
+                reasons.append(f"Overall CGPA ({cgpa:.2f}) < {C.BBA_OLD_MIN_CGPA:.2f}")
+            if core_cgpa < C.BBA_OLD_CORE_CGPA:
+                eligible = False
+                reasons.append(f"Core CGPA ({core_cgpa:.2f}) < {C.BBA_OLD_CORE_CGPA:.2f}")
+            # Legacy mode: unauthorized-retake flags are treated as advisory only.
+
+            result = {
+                "eligible": eligible,
+                "reasons": reasons,
+                "remaining": remaining,
+                "core_cgpa": core_cgpa,
+                "concentration_cgpa": core_cgpa,
+                "concentration_label": "Legacy Curriculum",
+                "total_credits_required": total_required,
+            }
+            result["prereq_violations"] = GraduationAuditor.check_prerequisite_violations("BBA", records, waivers)
+            return result
+
         remaining = {}
         reasons = []
         total_required = C.BBA_TOTAL_CREDITS - credit_reduction
@@ -576,6 +641,14 @@ class GraduationAuditor:
         if program.upper() == "CSE":
             return GraduationAuditor._audit_cse(records, waivers, credits_earned, cgpa, credit_reduction)
         elif program.upper() == "BBA":
-            return GraduationAuditor._audit_bba(records, waivers, credits_earned, cgpa, credit_reduction, concentration)
+            # Auto-route pre-2014 cohorts to legacy BBA behavior.
+            legacy_mode = GraduationAuditor._is_legacy_bba(records)
+            return GraduationAuditor._audit_bba(
+                records, waivers, credits_earned, cgpa, credit_reduction, concentration, legacy_mode=legacy_mode
+            )
+        elif program.upper() == "BBA-OLD":
+            return GraduationAuditor._audit_bba(
+                records, waivers, credits_earned, cgpa, credit_reduction, concentration=None, legacy_mode=True
+            )
         else:
-            raise ValueError(f"Unknown program: {program}. Use 'CSE' or 'BBA'.")
+            raise ValueError(f"Unknown program: {program}. Use 'CSE', 'BBA', or 'BBA-OLD'.")

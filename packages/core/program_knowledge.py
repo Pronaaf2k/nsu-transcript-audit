@@ -9,6 +9,7 @@ from packages.cli.audit.audit_l3 import parse_program_knowledge
 PROGRAM_CODE_TO_NAME: dict[str, str] = {
     "CSE": "Computer Science & Engineering",
     "BBA": "Business Administration",
+    "BBA-OLD": "Business Administration (Legacy pre-2014)",
     "ETE": "Electronic & Telecom Engineering",
     "ENV": "Environmental Science & Management",
     "ENG": "English",
@@ -18,6 +19,9 @@ PROGRAM_CODE_TO_NAME: dict[str, str] = {
 PROGRAM_ALIASES: dict[str, str] = {
     "EEE": "ETE",
     "ECE": "ETE",
+    "BBAOLD": "BBA-OLD",
+    "BBA_OLD": "BBA-OLD",
+    "OLD-BBA": "BBA-OLD",
 }
 
 
@@ -41,6 +45,9 @@ def normalize_program_code(program: str) -> str:
 
 def get_program_name(program: str) -> str:
     code = normalize_program_code(program)
+    if code == "BBA-OLD":
+        # program.md section name remains Business Administration
+        return "Business Administration"
     if code in PROGRAM_CODE_TO_NAME:
         return PROGRAM_CODE_TO_NAME[code]
 
@@ -68,6 +75,10 @@ def list_supported_programs() -> list[dict[str, str]]:
     md_names = set(list_program_names_in_md())
     programs: list[dict[str, str]] = []
     for code, name in PROGRAM_CODE_TO_NAME.items():
+        if code == "BBA-OLD":
+            if (not md_names) or ("Business Administration" in md_names):
+                programs.append({"code": code, "name": name})
+            continue
         if not md_names or name in md_names:
             programs.append({"code": code, "name": name})
     return programs

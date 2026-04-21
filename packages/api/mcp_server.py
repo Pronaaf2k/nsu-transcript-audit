@@ -21,7 +21,10 @@ Usage:
 
 import json
 import os
+import re
 import sys
+import csv
+import io
 from pathlib import Path
 from typing import Any
 
@@ -204,6 +207,83 @@ def get_audit_by_id(audit_id: str) -> dict:
         return {"status": "error", "message": str(e)}
 
 
+def _infer_program_from_csv(csv_text: str) -> tuple[str | None, float]:
+    reader = csv.DictReader(io.StringIO(csv_text))
+    rows = list(reader)
+    if not rows:
+        return None, 0.0
+
+    program_prefixes = {
+        "CSE": {"CSE", "MAT", "PHY", "CHE"},
+        "BBA": {"ACT", "FIN", "MGT", "MKT", "MIS", "BUS", "ACC"},
+        "ETE": {"ETE", "EEE", "PHY", "MAT", "CSE"},
+        "ENV": {"ENV", "EVM", "BIO", "CHE"},
+        "ENG": {"ENG", "LIN", "LIT"},
+        "ECO": {"ECO", "ECN", "MAT"},
+    }
+    scores = {p: 0 for p in program_prefixes}
+    matched = 0
+
+    for row in rows:
+        code = str(row.get("Course_Code", "")).strip().upper()
+        m = re.match(r"^[A-Z]{3}", code)
+        if not m:
+            continue
+        prefix = m.group(0)
+        hit = False
+        for prog, prefixes in program_prefixes.items():
+            if prefix in prefixes:
+                scores[prog] += 1
+                hit = True
+        if hit:
+            matched += 1
+
+    if matched == 0:
+        return None, 0.0
+    inferred = max(scores, key=scores.get)
+    return inferred, scores[inferred] / matched
+
+
+def ocr_extract_csv(file_path: str) -> dict:
+    """Extract transcript CSV from a local PDF/image file using Gemini OCR."""
+    from packages.core.pdf_parser import VisionParser
+
+    p = Path(file_path)
+    if not p.exists() or not p.is_file():
+        return {"status": "error", "message": f"File not found: {file_path}"}
+
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    if not api_key:
+        return {"status": "error", "message": "GEMINI_API_KEY is not configured"}
+
+    try:
+        file_bytes = p.read_bytes()
+        rows = VisionParser.parse(file_bytes, api_key, filename=p.name)
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=["Course_Code", "Course_Name", "Credits", "Grade", "Semester"])
+        writer.writeheader()
+        for r in rows:
+            writer.writerow({
+                "Course_Code": r.get("course_code", ""),
+                "Course_Name": r.get("course_name", ""),
+                "Credits": str(r.get("credits", "")),
+                "Grade": r.get("grade", ""),
+                "Semester": r.get("semester", ""),
+            })
+        csv_text = buf.getvalue()
+        inferred_program, confidence = _infer_program_from_csv(csv_text)
+        return {
+            "status": "success",
+            "file": str(p),
+            "rows_extracted": len(rows),
+            "csv_text": csv_text,
+            "program_inferred": inferred_program,
+            "program_inference_confidence": round(confidence, 3),
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 TOOLS = {
     "audit_run": {
         "description": "Run a full L1/L2/L3 audit on a CSV transcript",
@@ -255,6 +335,16 @@ TOOLS = {
             },
             "required": ["audit_id"]
         }
+    },
+    "ocr_extract": {
+        "description": "Extract CSV from a local transcript image/PDF using OCR",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "file_path": {"type": "string", "description": "Absolute path to transcript file (.pdf/.png/.jpg/.jpeg/.webp)"}
+            },
+            "required": ["file_path"]
+        }
     }
 }
 
@@ -270,6 +360,8 @@ def handle_tool_call(tool_name: str, arguments: dict) -> dict:
         return get_audit_history(arguments.get("limit", 10))
     elif tool_name == "history_get":
         return get_audit_by_id(arguments["audit_id"])
+    elif tool_name == "ocr_extract":
+        return ocr_extract_csv(arguments["file_path"])
     else:
         return {"status": "error", "message": f"Unknown tool: {tool_name}"}
 

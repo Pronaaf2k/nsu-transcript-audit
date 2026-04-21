@@ -66,27 +66,13 @@ class UnifiedAuditor:
         records = level_1["records"]
         credits_earned = level_1["credits_earned"]
 
-        if level_1["unrecognized"]:
-            return {
-                "meta": {
-                    "program": program.upper(),
-                    "concentration": concentration,
-                    "fake_transcript": False,  # Don't fail on unrecognized - may be valid electives
-                    "unrecognized_courses": list(level_1["unrecognized"]),
-                },
-                "level_1": {
-                    "credits_attempted": level_1["credits_attempted"],
-                    "credits_earned": credits_earned,
-                },
-                "level_2": None,
-                "level_3": None,
-                "roadmap": None,
-            }
-
-        return UnifiedAuditor._run_pipeline(
+        result = UnifiedAuditor._run_pipeline(
             records, program, credits_earned,
             level_1["credits_attempted"], concentration, user_waivers,
         )
+        if level_1["unrecognized"]:
+            result.setdefault("meta", {})["unrecognized_courses"] = list(level_1["unrecognized"])
+        return result
 
     @staticmethod
     def run_from_rows(rows: list[dict], program: str,
@@ -96,8 +82,10 @@ class UnifiedAuditor:
         Full audit pipeline from pre-parsed dict rows (API/DB path).
         Uses program.md for validation instead of hardcoded catalog.
         """
-        # Use CLI audit module if available (uses program.md)
-        if HAS_CLI_AUDIT:
+        # Use core pipeline for CSE/BBA/BBA-OLD so curriculum logic is applied
+        # consistently. Keep CLI program.md path for other programs.
+        program_upper = (program or "").upper()
+        if HAS_CLI_AUDIT and program_upper not in {"CSE", "BBA", "BBA-OLD"}:
             return UnifiedAuditor._run_cli_audit(rows, program, concentration)
         
         # Fallback to old behavior
@@ -105,27 +93,13 @@ class UnifiedAuditor:
         records = level_1["records"]
         credits_earned = level_1["credits_earned"]
 
-        if level_1["unrecognized"]:
-            return {
-                "meta": {
-                    "program": program.upper(),
-                    "concentration": concentration,
-                    "fake_transcript": False,
-                    "unrecognized_courses": list(level_1["unrecognized"]),
-                },
-                "level_1": {
-                    "credits_attempted": level_1["credits_attempted"],
-                    "credits_earned": credits_earned,
-                },
-                "level_2": None,
-                "level_3": None,
-                "roadmap": None,
-            }
-
-        return UnifiedAuditor._run_pipeline(
+        result = UnifiedAuditor._run_pipeline(
             records, program, credits_earned,
             level_1["credits_attempted"], concentration, user_waivers,
         )
+        if level_1["unrecognized"]:
+            result.setdefault("meta", {})["unrecognized_courses"] = list(level_1["unrecognized"])
+        return result
 
     @staticmethod
     def _run_cli_audit(rows: list[dict], program: str, concentration: str | None = None) -> dict:

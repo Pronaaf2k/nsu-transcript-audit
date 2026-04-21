@@ -31,7 +31,7 @@ app = typer.Typer(
 )
 console = Console()
 
-PROGRAM_CODES = ["CSE", "BBA", "ETE", "ENV", "ENG", "ECO"]
+PROGRAM_CODES = ["CSE", "BBA", "BBA-OLD", "ETE", "ENV", "ENG", "ECO"]
 SESSION_FILE = Path.home() / ".nsu-audit" / "session.json"
 
 

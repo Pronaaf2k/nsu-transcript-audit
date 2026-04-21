@@ -58,7 +58,26 @@ def get_client(require_auth: bool = True) -> Client:
     )
     if SESSION_FILE.exists():
         session = json.loads(SESSION_FILE.read_text())
-        supabase.auth.set_session(session["access_token"], session["refresh_token"])
+        access_token = session.get("access_token", "")
+        refresh_token = session.get("refresh_token", "")
+        if not access_token or not refresh_token:
+            try:
+                SESSION_FILE.unlink()
+            except Exception:
+                pass
+            if require_auth:
+                raise RuntimeError("Session expired. Please login again.")
+            return supabase
+        try:
+            supabase.auth.set_session(access_token, refresh_token)
+        except Exception:
+            try:
+                SESSION_FILE.unlink()
+            except Exception:
+                pass
+            if require_auth:
+                raise RuntimeError("Session expired. Please login again.")
+            return supabase
     elif require_auth:
         raise RuntimeError("Not logged in. Run: nsu-audit login")
     return supabase

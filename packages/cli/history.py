@@ -15,20 +15,40 @@ API_URL = os.environ.get("NEXT_PUBLIC_API_URL") or os.environ.get("GRADGATE_API_
 
 
 def list_history(limit: int = 20) -> None:
-    supabase = get_client()
-    session = supabase.auth.get_session()
-    token = session.access_token
+    try:
+        supabase = get_client()
+        session = supabase.auth.get_session()
+        if not session or not getattr(session, "access_token", None):
+            console.print("[yellow]No active session. Please login again.[/yellow]")
+            return
+        token = session.access_token
 
-    res = httpx.get(
-        f"{API_URL.rstrip('/')}/history",
-        params={"limit": limit},
-        headers={"Authorization": f"Bearer {token}"},
-        timeout=30,
-    )
-    if not res.is_success:
-        detail = res.json().get("detail", res.text)
-        raise RuntimeError(f"History request failed: {detail}")
-    scans = res.json() or []
+        res = httpx.get(
+            f"{API_URL.rstrip('/')}/history",
+            params={"limit": limit},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30,
+        )
+
+        payload = None
+        try:
+            payload = res.json()
+        except Exception:
+            payload = None
+
+        if not res.is_success:
+            if res.status_code in (401, 403):
+                console.print("[yellow]Session expired or unauthorized. Please logout and login again.[/yellow]")
+                return
+            detail = payload.get("detail", res.text) if isinstance(payload, dict) else res.text
+            detail = str(detail).strip() or f"HTTP {res.status_code}"
+            console.print(f"[red]Could not fetch history:[/red] {detail}")
+            return
+
+        scans = payload if isinstance(payload, list) else []
+    except Exception as e:
+        console.print(f"[red]Could not fetch history:[/red] {e}")
+        return
 
     if not scans:
         console.print("[yellow]No transcript checked yet.[/yellow]")
@@ -47,11 +67,14 @@ def list_history(limit: int = 20) -> None:
     status_colors = {"PASS": "green", "FAIL": "red", "PENDING": "yellow"}
 
     for i, s in enumerate(scans, 1):
+        if not isinstance(s, dict):
+            continue
         st = s.get("graduation_status", "PENDING")
         col = status_colors.get(st, "white")
+        created_at = str(s.get("created_at") or "")
         t.add_row(
             str(i),
-            s["created_at"][:10],
+            created_at[:10] if created_at else "-",
             s.get("file_name") or "(unknown)",
             s.get("program") or "—",
             str(s.get("total_credits") or "—"),

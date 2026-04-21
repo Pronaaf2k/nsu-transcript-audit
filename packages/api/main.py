@@ -28,6 +28,7 @@ import csv
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -101,6 +102,49 @@ def _courses_to_csv(courses: list[dict[str, Any]]) -> str:
             "Attempt":     c.get("attempt",   c.get("Attempt", 1)),
         })
     return buf.getvalue()
+
+
+def _infer_program_from_csv(csv_text: str) -> tuple[str | None, float]:
+    """Infer likely program from course-code prefixes in parsed transcript rows."""
+    reader = csv.DictReader(io.StringIO(csv_text))
+    rows = list(reader)
+    if not rows:
+        return None, 0.0
+
+    program_prefixes: dict[str, set[str]] = {
+        "CSE": {"CSE", "MAT", "PHY", "CHE"},
+        "BBA": {"ACT", "FIN", "MGT", "MKT", "MIS", "BUS", "ACC"},
+        "ETE": {"ETE", "EEE", "PHY", "MAT", "CSE"},
+        "ENV": {"ENV", "EVM", "BIO", "CHE"},
+        "ENG": {"ENG", "LIN", "LIT"},
+        "ECO": {"ECO", "ECN", "MAT"},
+    }
+
+    scores: dict[str, int] = {p: 0 for p in program_prefixes}
+    matched = 0
+
+    for row in rows:
+        code = str(row.get("Course_Code", "")).strip().upper()
+        if not code:
+            continue
+        m = re.match(r"^[A-Z]{3}", code)
+        if not m:
+            continue
+        prefix = m.group(0)
+        hit = False
+        for prog, prefixes in program_prefixes.items():
+            if prefix in prefixes:
+                scores[prog] += 1
+                hit = True
+        if hit:
+            matched += 1
+
+    if matched == 0:
+        return None, 0.0
+
+    inferred = max(scores, key=scores.get)
+    confidence = scores[inferred] / matched
+    return inferred, confidence
 
 
 def _run_audit(
@@ -352,7 +396,7 @@ async def audit_image(
     Upload a transcript image or PDF.
     Tesseract extracts course data, then runs the full L1/L2/L3 audit.
     """
-    program = normalize_program_code(program)
+    requested_program = normalize_program_code(program)
     file_bytes = await file.read()
     try:
         csv_text = _parse_bytes_with_gemini(file_bytes, file.filename or "transcript.pdf")
@@ -362,8 +406,21 @@ async def audit_image(
                 detail="Gemini LLM could not extract any course data from this file. "
                        "Ensure the image is a valid academic transcript.",
             )
-        result = _run_audit(csv_text, program, current_user, audit_level=audit_level)
+        inferred_program, confidence = _infer_program_from_csv(csv_text)
+        effective_program = requested_program
+        # Respect explicit legacy selection: BBA-OLD should not be auto-upgraded to BBA.
+        if requested_program == "BBA-OLD" and inferred_program == "BBA":
+            effective_program = requested_program
+        elif inferred_program and inferred_program != requested_program and confidence >= 0.55:
+            effective_program = inferred_program
+
+        result = _run_audit(csv_text, effective_program, current_user, audit_level=audit_level)
         result["raw_ocr"] = "Parsed natively using Gemini 2.5 Flash."
+        result["csv_text"] = csv_text
+        result["program_requested"] = requested_program
+        result["program_used"] = effective_program
+        result["program_inferred_from_transcript"] = inferred_program
+        result["program_inference_confidence"] = round(confidence, 3)
         return result
     except HTTPException:
         raise

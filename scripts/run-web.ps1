@@ -2,6 +2,9 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+. (Join-Path $PSScriptRoot 'import-root-env.ps1')
+[void](Import-RootEnv -RootPath $root)
+
 $apiDir = Join-Path $root 'packages/api'
 $apiPython = Join-Path $apiDir '.venv/Scripts/python.exe'
 $apiUrl = 'http://127.0.0.1:8000/health'
