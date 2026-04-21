@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { View, Text, TouchableOpacity, StyleSheet, TextInput, ScrollView, ActivityIndicator, Alert } from 'react-native'
 import { useRouter } from 'expo-router'
-import { supabase } from '../../lib/supabase'
+import { supabase, SUPABASE_CONFIG_ERROR } from '../../lib/supabase'
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? ''
 const CATEGORIES = ['Mobile App', 'Web App', 'CLI Tool', 'MCP Server', 'Other']
@@ -18,6 +18,10 @@ export default function FeedbackScreen() {
     const [submitted, setSubmitted] = useState(false)
 
     async function submit() {
+        if (!supabase) {
+            Alert.alert('Configuration Error', SUPABASE_CONFIG_ERROR ?? 'Supabase is not configured')
+            return
+        }
         if (rating === 0) {
             Alert.alert('Please select a rating')
             return

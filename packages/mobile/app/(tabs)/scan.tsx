@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, ScrollView } from 'react-native'
 import * as DocumentPicker from 'expo-document-picker'
-import { supabase } from '../../lib/supabase'
+import { useRouter } from 'expo-router'
+import { supabase, SUPABASE_CONFIG_ERROR } from '../../lib/supabase'
+import { signOut, useAuthSession } from '../../lib/auth'
 
 const PROGRAMS = [
     { code: 'CSE', label: 'CSE' },
@@ -53,6 +55,8 @@ type AuditResult = {
 }
 
 export default function ScanScreen() {
+    const router = useRouter()
+    const { session } = useAuthSession()
     const [program, setProgram] = useState('CSE')
     const [auditLevel, setAuditLevel] = useState<typeof LEVELS[number]>('3')
     const [mode, setMode] = useState<typeof MODES[number]['key']>('csv')
@@ -63,6 +67,7 @@ export default function ScanScreen() {
     const [result, setResult] = useState<AuditResult | null>(null)
 
     useEffect(() => {
+        if (!supabase || !session) return
         let mounted = true
         supabase.auth.getSession().then(async ({ data }) => {
             if (!mounted) return
@@ -75,9 +80,14 @@ export default function ScanScreen() {
         return () => {
             mounted = false
         }
-    }, [])
+    }, [session])
 
     async function loadHistory(existingToken?: string) {
+        if (!supabase) {
+            setHistory([])
+            setHistoryLoading(false)
+            return
+        }
         setHistoryLoading(true)
         try {
             const token = existingToken ?? (await supabase.auth.getSession()).data.session?.access_token
@@ -100,14 +110,26 @@ export default function ScanScreen() {
     }
 
     async function logout() {
-        await supabase.auth.signOut()
+        if (!session) {
+            router.replace('/login' as never)
+            return
+        }
+        if (!supabase) {
+            Alert.alert('Configuration Error', SUPABASE_CONFIG_ERROR ?? 'Supabase is not configured')
+            return
+        }
+        await signOut()
         setResult(null)
         setHistory([])
         setUserEmail('')
-        Alert.alert('Logged out')
+        router.replace('/login' as never)
     }
 
     async function pickAndScan() {
+        if (!supabase) {
+            Alert.alert('Configuration Error', SUPABASE_CONFIG_ERROR ?? 'Supabase is not configured')
+            return
+        }
         const picked = await DocumentPicker.getDocumentAsync({
             type: ['application/pdf', 'image/*', 'text/csv', 'text/comma-separated-values'],
             copyToCacheDirectory: true,
@@ -184,6 +206,12 @@ export default function ScanScreen() {
 
     return (
         <ScrollView style={s.container} contentContainerStyle={{ padding: 16 }}>
+            {!supabase && (
+                <View style={[s.card, { marginBottom: 16, borderColor: '#f43f5e' }]}> 
+                    <Text style={[s.cardTitle, { color: '#fda4af' }]}>Configuration Error</Text>
+                    <Text style={s.meta}>This build is missing the public Supabase configuration.</Text>
+                </View>
+            )}
             <View style={s.headerRow}>
                 <Text style={s.headerTitle}>New Audit</Text>
                 <TouchableOpacity style={s.logoutBtn} onPress={logout}>

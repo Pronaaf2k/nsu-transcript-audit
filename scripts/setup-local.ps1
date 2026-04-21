@@ -43,7 +43,6 @@ Ensure-Venv $cliVenvDir $cliPython 'packages/cli/.venv'
 Write-Host "==> Installing API Python dependencies" -ForegroundColor Cyan
 & "$apiPython" -m pip install --upgrade pip
 & "$apiPython" -m pip install -r (Join-Path $root 'packages/api/requirements.txt')
-& "$apiPython" -m pip install "httpx>=0.28.0"
 
 Write-Host "==> Installing CLI Python dependencies" -ForegroundColor Cyan
 & "$cliPython" -m pip install --upgrade pip

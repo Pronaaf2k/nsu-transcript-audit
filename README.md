@@ -57,16 +57,23 @@ A full-stack graduation audit system for North South University (NSU) students. 
 ## Getting Started
 
 ### Prerequisites
+- Git
 - Node.js 20+
-- Python 3.11+
+- pnpm 9+
+- Python 3.11+ (`py` launcher on Windows)
+- PowerShell 5.1+
 - Supabase account
 - Gemini API key
 
-### Quick Local Run (Windows)
+### Fresh Device Setup (Windows PowerShell)
 
-From repo root:
+Use these exact commands on a brand-new machine:
 
 ```powershell
+git clone https://github.com/Pronaaf2k/nsu-transcript-audit.git
+cd nsu-transcript-audit
+Copy-Item .env.example .env
+# edit .env and fill all required values before continuing
 pnpm setup:local
 pnpm dev:local
 ```
@@ -75,73 +82,114 @@ This starts:
 - Web app: `http://localhost:3000`
 - API docs: `http://localhost:8000/docs`
 
-Important: this repo now uses a single root `.env` for local runs (`pnpm cli`, `pnpm web`, `pnpm dev:mobile`, `pnpm dev:local`).
+Important: this repo uses a single root `.env` for local runs (`pnpm cli`, `pnpm web`, `pnpm dev:mobile`, `pnpm dev:local`).
 
-Run CLI from repo root:
+### Required Environment Variables (`.env` at repo root)
+
+Start from `.env.example` and set these values:
+
+```
+SUPABASE_URL=...
+SUPABASE_ANON_KEY=...
+SUPABASE_JWT_SECRET=...
+SUPABASE_SERVICE_ROLE_KEY=...            # optional for server-side writes
+
+GEMINI_API_KEY=...
+
+NEXT_PUBLIC_API_URL=http://localhost:8000
+EXPO_PUBLIC_API_URL=http://localhost:8000
+GRADGATE_API_URL=http://localhost:8000
+
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
+
+EXPO_PUBLIC_SUPABASE_URL=...
+EXPO_PUBLIC_SUPABASE_ANON_KEY=...
+```
+
+### Day-to-Day Run Commands (from repo root)
+
+- Start web + API together (recommended):
 
 ```powershell
-pnpm cli -- --help
+pnpm dev:local
+```
+
+- Start web only (auto-starts API if needed):
+
+```powershell
+pnpm web
+```
+
+- Start CLI (auto-starts API if needed):
+
+```powershell
 pnpm cli
+pnpm cli -- --help
 pnpm cli -- audit sample.csv --program CSE
 ```
 
-`pnpm cli` opens an interactive menu with login, scan, audit, history, and report options.
+- Start mobile (Expo):
 
-Run full test suite from repo root:
+```powershell
+pnpm dev:mobile
+```
+
+- Run all checks:
 
 ```powershell
 pnpm test:all
 ```
 
-### Local Development
+### API-Only Run (manual)
 
-1. **Clone the repo**
-```bash
+If you only want FastAPI without web/CLI wrappers:
+
+```powershell
+cd packages\api
+.\.venv\Scripts\python.exe -m uvicorn main:app --reload --port 8000
+```
+
+### MCP Server: Run + Smoke Test (Windows PowerShell)
+
+```powershell
+@'
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0.1"}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+'@ | .\packages\api\.venv\Scripts\python.exe packages/api/mcp_server.py
+```
+
+Expected: one `initialize` response and one `tools/list` response containing tools like `audit_run`, `cgpa_breakdown`, `check_missing`.
+
+Tool call smoke test:
+
+```powershell
+$csv = "Course_Code,Course_Name,Credits,Grade,Semester`nCSE115,Programming Language I,3,A,Spring 2024`nMAT125,Linear Algebra,3,B+,Spring 2024"
+$req = @{ jsonrpc="2.0"; id=3; method="tools/call"; params=@{ name="audit_run"; arguments=@{ csv_text=$csv; program="CSE" } } } | ConvertTo-Json -Compress -Depth 10
+$req | .\packages\api\.venv\Scripts\python.exe packages/api/mcp_server.py
+```
+
+Expected: output contains `"status": "success"` in tool response text.
+
+### Codex / AI Agent Bootstrap (copy-paste)
+
+If you open this repo in Codex on a new machine, run this first so it has a real working baseline:
+
+```powershell
 git clone https://github.com/Pronaaf2k/nsu-transcript-audit.git
 cd nsu-transcript-audit
+Copy-Item .env.example .env
+# fill .env values
+pnpm setup:local
+pnpm test:all
+@'
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0.1"}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+'@ | .\packages\api\.venv\Scripts\python.exe packages/api/mcp_server.py
 ```
 
-2. **Frontend**
-```bash
-cd packages/web
-npm install
-npm run dev
-```
+Do not mix in ad-hoc package installs unless required; this repo is wired to `pnpm setup:local`.
 
-3. **Backend**
-```bash
-cd packages/api
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
-```
-
-4. **CLI**
-```bash
-cd packages/cli
-pip install -r requirements.txt
-py main.py --help
-```
-
-5. **Environment Variables (single file)**
-
-Create one file at repo root: `.env`
-
-```
-SUPABASE_URL=your_supabase_url
-SUPABASE_ANON_KEY=your_anon_key
-SUPABASE_SERVICE_ROLE_KEY=your_service_key
-SUPABASE_JWT_SECRET=your_jwt_secret_if_hs256
-
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
-NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
-EXPO_PUBLIC_API_URL=http://127.0.0.1:8000
-EXPO_PUBLIC_SUPABASE_URL=your_supabase_url
-EXPO_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
-GRADGATE_API_URL=http://127.0.0.1:8000
-
-GEMINI_API_KEY=your_gemini_key
-```
 
 ## API Endpoints
 
