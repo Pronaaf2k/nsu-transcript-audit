@@ -171,6 +171,10 @@ $req | .\packages\api\.venv\Scripts\python.exe packages/api/mcp_server.py
 
 Expected: output contains `"status": "success"` in tool response text.
 
+### Local MCP Server
+
+For safe project inspection and backend discovery tools, see `mcp_server/README.md`.
+
 ### Codex / AI Agent Bootstrap (copy-paste)
 
 If you open this repo in Codex on a new machine, run this first so it has a real working baseline:
