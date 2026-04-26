@@ -25,6 +25,7 @@ GET /health
 from __future__ import annotations
 
 import csv
+import html
 import io
 import json
 import os
@@ -41,6 +42,7 @@ if str(ROOT_DIR) not in sys.path:
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from packages.api.auth import CurrentUser
 
@@ -83,6 +85,69 @@ try:
 except ImportError:
     def save_transcript_and_audit(*args, **kwargs):
         pass  # Supabase not configured
+
+
+def _get_mcp_tools_catalog() -> list[dict[str, Any]]:
+    from packages.api.mcp_server import TOOLS
+
+    tools = []
+    for name, spec in TOOLS.items():
+        tools.append({
+            "name": name,
+            "description": spec["description"],
+            "inputSchema": spec["inputSchema"],
+        })
+    return tools
+
+
+def _render_mcp_docs_page(tools: list[dict[str, Any]]) -> str:
+    cards = []
+    for tool in tools:
+        schema_json = html.escape(json.dumps(tool["inputSchema"], indent=2))
+        name = html.escape(tool["name"])
+        description = html.escape(tool["description"])
+        cards.append(
+            f"""
+            <section class=\"tool\">
+              <h2>{name}</h2>
+              <p>{description}</p>
+              <details>
+                <summary>Input schema</summary>
+                <pre>{schema_json}</pre>
+              </details>
+            </section>
+            """
+        )
+
+    body = "\n".join(cards)
+    return f"""
+    <!doctype html>
+    <html lang=\"en\">
+      <head>
+        <meta charset=\"utf-8\" />
+        <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+        <title>NSU Audit MCP Docs</title>
+        <style>
+          body {{ font-family: Arial, sans-serif; margin: 0; background: #0b1220; color: #e5e7eb; }}
+          main {{ max-width: 960px; margin: 0 auto; padding: 32px 20px 64px; }}
+          a {{ color: #7dd3fc; }}
+          .meta {{ color: #94a3b8; margin-bottom: 24px; }}
+          .tool {{ background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 20px; margin-bottom: 16px; }}
+          h1, h2 {{ margin-top: 0; }}
+          pre {{ overflow-x: auto; background: #020617; padding: 16px; border-radius: 10px; border: 1px solid #1f2937; }}
+          summary {{ cursor: pointer; color: #93c5fd; }}
+        </style>
+      </head>
+      <body>
+        <main>
+          <h1>NSU Audit MCP Docs</h1>
+          <p class=\"meta\">This page documents the stdio MCP server exposed by <code>packages/api/mcp_server.py</code>.</p>
+          <p><a href=\"/mcp/tools\">View raw MCP tool catalog JSON</a></p>
+          {body}
+        </main>
+      </body>
+    </html>
+    """
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -293,6 +358,20 @@ def health():
         "ocr": "gemini",
         "gemini_configured": bool(os.environ.get("GEMINI_API_KEY")),
     }
+
+
+@app.get("/mcp/tools")
+def get_mcp_tools():
+    return {
+        "server": "packages/api/mcp_server.py",
+        "transport": "stdio",
+        "tools": _get_mcp_tools_catalog(),
+    }
+
+
+@app.get("/mcp/docs", response_class=HTMLResponse)
+def get_mcp_docs():
+    return _render_mcp_docs_page(_get_mcp_tools_catalog())
 
 
 @app.get("/programs")

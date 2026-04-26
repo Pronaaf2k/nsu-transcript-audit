@@ -25,11 +25,15 @@ import re
 import sys
 import csv
 import io
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 ROOT_DIR = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT_DIR))
+BACKEND_URL = os.environ.get("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
 
 try:
     from dotenv import load_dotenv
@@ -38,6 +42,30 @@ except ImportError:
     pass
 
 MCP_VERSION = "2024-11-05"
+EXCLUDED_DIRS = {
+    ".git",
+    ".next",
+    ".venv",
+    "__pycache__",
+    "node_modules",
+    "runs",
+    "checkpoints",
+    "datasets",
+    "weights",
+    "wandb",
+}
+DATASET_DIR_HINTS = {"data", "dataset", "datasets", "samples", "fixtures", "annotations"}
+TRAINING_DIR_HINTS = {"runs", "checkpoints", "wandb", "tensorboard", "outputs", "logs"}
+METRIC_KEYS = {"cer", "wer", "accuracy", "acc", "loss", "f1", "precision", "recall"}
+TEXT_LOG_EXTENSIONS = {".log", ".txt", ".out"}
+MANIFEST_NAMES = {
+    "manifest.json",
+    "manifest.jsonl",
+    "dataset.json",
+    "dataset.jsonl",
+    "metadata.json",
+    "annotations.json",
+}
 
 
 def jsonrpc_response(result: Any, error: dict | None = None, request_id: int = 1) -> dict:
@@ -48,6 +76,224 @@ def jsonrpc_response(result: Any, error: dict | None = None, request_id: int = 1
 
 def jsonrpc_error(code: int, message: str, request_id: int = 1) -> dict:
     return jsonrpc_response(None, {"code": code, "message": message}, request_id)
+
+
+def _safe_rel(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(ROOT_DIR.resolve())).replace("\\", "/")
+    except Exception:
+        return str(path.resolve()).replace("\\", "/")
+
+
+def _iter_files(limit: int = 5000) -> Iterator[Path]:
+    seen = 0
+    for current_root, dirnames, filenames in os.walk(ROOT_DIR):
+        dirnames[:] = [d for d in dirnames if d not in EXCLUDED_DIRS and not d.startswith(".")]
+        root_path = Path(current_root)
+        for filename in filenames:
+            if filename.startswith(".env"):
+                continue
+            path = root_path / filename
+            yield path
+            seen += 1
+            if seen >= limit:
+                return
+
+
+def _iter_dirs(limit: int = 1000) -> Iterator[Path]:
+    seen = 0
+    for current_root, dirnames, _filenames in os.walk(ROOT_DIR):
+        dirnames[:] = [d for d in dirnames if d not in EXCLUDED_DIRS and not d.startswith(".")]
+        for dirname in dirnames:
+            path = Path(current_root) / dirname
+            yield path
+            seen += 1
+            if seen >= limit:
+                return
+
+
+def _read_text(path: Path, max_chars: int = 120_000) -> str:
+    return path.read_text(encoding="utf-8", errors="replace")[:max_chars]
+
+
+def _find_recent_files(candidates: list[Path]) -> list[Path]:
+    return sorted((p for p in candidates if p.exists() and p.is_file()), key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def _summarize_tree(base: Path, depth: int = 3, max_entries_per_dir: int = 20) -> list[str]:
+    lines: list[str] = []
+
+    def walk(path: Path, prefix: str, level: int) -> None:
+        if level > depth:
+            return
+        try:
+            entries = sorted(path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+        except OSError:
+            return
+        visible = [p for p in entries if p.name not in EXCLUDED_DIRS and not p.name.startswith(".env")]
+        shown = visible[:max_entries_per_dir]
+        for entry in shown:
+            suffix = "/" if entry.is_dir() else ""
+            lines.append(f"{prefix}{entry.name}{suffix}")
+            if entry.is_dir():
+                walk(entry, prefix + "  ", level + 1)
+        if len(visible) > len(shown):
+            lines.append(f"{prefix}... ({len(visible) - len(shown)} more entries)")
+
+    walk(base, "", 1)
+    return lines
+
+
+def _extract_routes_from_source() -> list[dict[str, Any]]:
+    main_py = ROOT_DIR / "packages" / "api" / "main.py"
+    if not main_py.exists():
+        return [{"error": "packages/api/main.py not found"}]
+
+    routes: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    pattern = re.compile(r'^@app\.(get|post|put|patch|delete)\("([^"]+)"')
+    for line in _read_text(main_py, max_chars=200_000).splitlines():
+        match = pattern.match(line.strip())
+        if match:
+            current = {
+                "path": match.group(2),
+                "methods": [match.group(1).upper()],
+                "name": None,
+                "source": "source_parse",
+            }
+            routes.append(current)
+            continue
+        stripped = line.strip()
+        if current and stripped.startswith("def "):
+            current["name"] = stripped.split("def ", 1)[1].split("(", 1)[0]
+            current = None
+    return sorted(routes, key=lambda item: item["path"])
+
+
+def _extract_routes_from_fastapi() -> list[dict[str, Any]]:
+    try:
+        from packages.api.main import app
+
+        routes = []
+        for route in app.routes:
+            path = getattr(route, "path", None)
+            methods = sorted(m for m in (getattr(route, "methods", None) or set()) if m not in {"HEAD", "OPTIONS"})
+            if path and methods:
+                routes.append({
+                    "path": path,
+                    "methods": methods,
+                    "name": getattr(route, "name", None),
+                    "source": "fastapi_import",
+                })
+        return sorted(routes, key=lambda item: item["path"])
+    except Exception:
+        return _extract_routes_from_source()
+
+
+def _scan_dataset_candidates() -> dict[str, Any]:
+    dataset_dirs: list[dict[str, Any]] = []
+    manifest_files: list[str] = []
+    sample_files: list[str] = []
+
+    for path in _iter_files():
+        parts = {part.lower() for part in path.parts}
+        if path.name.lower() in MANIFEST_NAMES:
+            manifest_files.append(_safe_rel(path))
+        if path.suffix.lower() in {".csv", ".json", ".jsonl", ".txt"} and (DATASET_DIR_HINTS & parts or path.name.startswith("test_")):
+            sample_files.append(_safe_rel(path))
+
+    candidate_dirs: set[Path] = set()
+    for item in _iter_dirs():
+        if item.name.lower() in DATASET_DIR_HINTS:
+            candidate_dirs.add(item)
+
+    for directory in sorted(candidate_dirs):
+        file_count = 0
+        text_count = 0
+        for child in directory.rglob("*"):
+            if child.is_file():
+                file_count += 1
+                if child.suffix.lower() in {".csv", ".json", ".jsonl", ".txt", ".jpg", ".jpeg", ".png", ".pdf"}:
+                    text_count += 1
+        dataset_dirs.append({
+            "name": directory.name,
+            "path": _safe_rel(directory),
+            "file_count": file_count,
+            "recognized_file_count": text_count,
+        })
+
+    return {
+        "dataset_dirs": dataset_dirs,
+        "manifest_files": sorted(manifest_files)[:50],
+        "sample_files": sorted(sample_files)[:50],
+    }
+
+
+def _find_training_artifacts() -> dict[str, list[Path]]:
+    logs: list[Path] = []
+    metrics: list[Path] = []
+    checkpoints: list[Path] = []
+
+    for path in _iter_files():
+        lower_parts = {part.lower() for part in path.parts}
+        lower_name = path.name.lower()
+        if path.suffix.lower() in TEXT_LOG_EXTENSIONS and (TRAINING_DIR_HINTS & lower_parts or "train" in lower_name or "eval" in lower_name):
+            logs.append(path)
+        if path.suffix.lower() in {".json", ".jsonl", ".csv", ".txt"} and any(key in lower_name for key in ["metric", "eval", "result", "report"]):
+            metrics.append(path)
+        if path.suffix.lower() in {".ckpt", ".pt", ".pth", ".bin", ".safetensors"} or "checkpoint" in lower_name:
+            checkpoints.append(path)
+
+    return {
+        "logs": _find_recent_files(logs),
+        "metrics": _find_recent_files(metrics),
+        "checkpoints": _find_recent_files(checkpoints),
+    }
+
+
+def _extract_metrics_from_text(text: str) -> dict[str, Any]:
+    results: dict[str, Any] = {}
+    for key in METRIC_KEYS:
+        pattern = rf"(?i)\b{re.escape(key)}\b\s*[:=]\s*(-?\d+(?:\.\d+)?)"
+        match = re.search(pattern, text)
+        if match:
+            try:
+                results[key] = float(match.group(1))
+            except ValueError:
+                results[key] = match.group(1)
+    return results
+
+
+def _extract_metrics_from_file(path: Path) -> dict[str, Any]:
+    try:
+        if path.suffix.lower() in {".json", ".jsonl"}:
+            text = _read_text(path)
+            if path.suffix.lower() == ".jsonl":
+                for line in reversed([line for line in text.splitlines() if line.strip()]):
+                    try:
+                        data = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    metrics = {k: v for k, v in data.items() if str(k).lower() in METRIC_KEYS}
+                    if metrics:
+                        return metrics
+            data = json.loads(text)
+            if isinstance(data, dict):
+                direct = {k: v for k, v in data.items() if str(k).lower() in METRIC_KEYS}
+                if direct:
+                    return direct
+                nested = data.get("metrics")
+                if isinstance(nested, dict):
+                    return {k: v for k, v in nested.items() if str(k).lower() in METRIC_KEYS}
+        if path.suffix.lower() == ".csv":
+            text = _read_text(path)
+            rows = list(csv.DictReader(io.StringIO(text)))
+            if rows:
+                row = rows[-1]
+                return {k: row[k] for k in row if k.lower() in METRIC_KEYS and row[k] not in {"", None}}
+        return _extract_metrics_from_text(_read_text(path, max_chars=20_000))
+    except Exception as exc:
+        return {"error": str(exc)}
 
 
 def run_audit_from_csv(csv_text: str, program: str = "CSE") -> dict:
@@ -284,7 +530,167 @@ def ocr_extract_csv(file_path: str) -> dict:
         return {"status": "error", "message": str(e)}
 
 
+def health_check() -> dict:
+    result: dict[str, Any] = {"backend_url": BACKEND_URL, "backend_alive": False}
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            response = client.get(f"{BACKEND_URL}/health")
+        result["backend_alive"] = response.is_success
+        result["status_code"] = response.status_code
+        if response.headers.get("content-type", "").startswith("application/json"):
+            result["payload"] = response.json()
+        else:
+            result["payload_preview"] = response.text[:500]
+    except Exception as exc:
+        result["error"] = str(exc)
+    return result
+
+
+def inspect_project_structure() -> dict:
+    return {
+        "root": str(ROOT_DIR),
+        "excluded_dirs": sorted(EXCLUDED_DIRS),
+        "tree": _summarize_tree(ROOT_DIR),
+    }
+
+
+def list_available_routes() -> dict:
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            response = client.get(f"{BACKEND_URL}/openapi.json")
+        if response.is_success:
+            spec = response.json()
+            routes = []
+            for path, methods in spec.get("paths", {}).items():
+                routes.append({
+                    "path": path,
+                    "methods": sorted(method.upper() for method in methods.keys()),
+                    "source": "openapi",
+                })
+            return {"source": "openapi", "backend_url": BACKEND_URL, "routes": sorted(routes, key=lambda item: item["path"])}
+    except Exception:
+        pass
+
+    routes = _extract_routes_from_fastapi()
+    source = "fastapi_import"
+    if routes and all(route.get("source") == "source_parse" for route in routes if isinstance(route, dict) and "path" in route):
+        source = "source_parse"
+    return {"source": source, "routes": routes}
+
+
+def list_datasets() -> dict:
+    scan = _scan_dataset_candidates()
+    return {
+        "dataset_dirs": scan["dataset_dirs"],
+        "manifest_files": scan["manifest_files"],
+        "sample_files": scan["sample_files"],
+        "note": "This repo appears to be an OCR/audit app. Results may mostly be fixtures or sample CSVs rather than training datasets.",
+    }
+
+
+def get_training_status() -> dict:
+    artifacts = _find_training_artifacts()
+    latest_log = artifacts["logs"][0] if artifacts["logs"] else None
+    latest_metric = artifacts["metrics"][0] if artifacts["metrics"] else None
+    latest_checkpoint = artifacts["checkpoints"][0] if artifacts["checkpoints"] else None
+    return {
+        "has_training_artifacts": bool(latest_log or latest_metric or latest_checkpoint),
+        "latest_log": _safe_rel(latest_log) if latest_log else None,
+        "latest_metrics": _safe_rel(latest_metric) if latest_metric else None,
+        "latest_checkpoint": _safe_rel(latest_checkpoint) if latest_checkpoint else None,
+        "log_count": len(artifacts["logs"]),
+        "metrics_count": len(artifacts["metrics"]),
+        "checkpoint_count": len(artifacts["checkpoints"]),
+        "note": "No long-running jobs are started by this tool. It only inspects existing files.",
+    }
+
+
+def read_recent_training_log(lines: int = 100) -> dict:
+    safe_lines = max(1, min(int(lines), 200))
+    artifacts = _find_training_artifacts()
+    if not artifacts["logs"]:
+        return {
+            "status": "not_available",
+            "message": "No likely training or evaluation log files were found in the repository.",
+        }
+    log_path = artifacts["logs"][0]
+    text = _read_text(log_path, max_chars=80_000)
+    tail = "\n".join(text.splitlines()[-safe_lines:])
+    return {
+        "status": "ok",
+        "path": _safe_rel(log_path),
+        "lines_requested": safe_lines,
+        "content": tail[:12_000],
+    }
+
+
+def run_ocr_on_image_path(image_path: str) -> dict:
+    candidate = Path(image_path)
+    if not candidate.is_absolute():
+        candidate = (ROOT_DIR / candidate).resolve()
+    return ocr_extract_csv(str(candidate))
+
+
+def get_latest_eval_metrics() -> dict:
+    artifacts = _find_training_artifacts()
+    if not artifacts["metrics"]:
+        return {
+            "status": "not_available",
+            "message": "No metrics or evaluation files were found.",
+        }
+    metric_path = artifacts["metrics"][0]
+    metrics = _extract_metrics_from_file(metric_path)
+    return {
+        "status": "ok" if metrics and "error" not in metrics else "not_available",
+        "path": _safe_rel(metric_path),
+        "metrics": metrics,
+    }
+
+
 TOOLS = {
+    "health_check": {
+        "description": "Check whether the configured backend is alive",
+        "inputSchema": {"type": "object", "properties": {}}
+    },
+    "inspect_project_structure": {
+        "description": "Return a summarized project tree excluding large and sensitive folders",
+        "inputSchema": {"type": "object", "properties": {}}
+    },
+    "list_available_routes": {
+        "description": "List backend routes from OpenAPI when available, or source inspection otherwise",
+        "inputSchema": {"type": "object", "properties": {}}
+    },
+    "list_datasets": {
+        "description": "Search for dataset-like folders, manifests, and sample files",
+        "inputSchema": {"type": "object", "properties": {}}
+    },
+    "get_training_status": {
+        "description": "Inspect the repo for training logs, metrics, and checkpoint artifacts",
+        "inputSchema": {"type": "object", "properties": {}}
+    },
+    "read_recent_training_log": {
+        "description": "Read the tail of the most relevant training or evaluation log file",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "lines": {"type": "number", "description": "Maximum lines to return", "default": 100}
+            }
+        }
+    },
+    "run_ocr_on_image_path": {
+        "description": "Run OCR on a local image or PDF path using the existing project OCR parser",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "image_path": {"type": "string", "description": "Absolute or repo-relative path to an image or PDF"}
+            },
+            "required": ["image_path"]
+        }
+    },
+    "get_latest_eval_metrics": {
+        "description": "Return the latest evaluation metrics found in the repository",
+        "inputSchema": {"type": "object", "properties": {}}
+    },
     "audit_run": {
         "description": "Run a full L1/L2/L3 audit on a CSV transcript",
         "inputSchema": {
@@ -350,7 +756,23 @@ TOOLS = {
 
 
 def handle_tool_call(tool_name: str, arguments: dict) -> dict:
-    if tool_name == "audit_run":
+    if tool_name == "health_check":
+        return health_check()
+    elif tool_name == "inspect_project_structure":
+        return inspect_project_structure()
+    elif tool_name == "list_available_routes":
+        return list_available_routes()
+    elif tool_name == "list_datasets":
+        return list_datasets()
+    elif tool_name == "get_training_status":
+        return get_training_status()
+    elif tool_name == "read_recent_training_log":
+        return read_recent_training_log(arguments.get("lines", 100))
+    elif tool_name == "run_ocr_on_image_path":
+        return run_ocr_on_image_path(arguments["image_path"])
+    elif tool_name == "get_latest_eval_metrics":
+        return get_latest_eval_metrics()
+    elif tool_name == "audit_run":
         return run_audit_from_csv(arguments["csv_text"], arguments.get("program", "CSE"))
     elif tool_name == "cgpa_breakdown":
         return get_cgpa_breakdown(arguments["csv_text"])

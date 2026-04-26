@@ -152,6 +152,8 @@ cd packages\api
 
 ### MCP Server: Run + Smoke Test (Windows PowerShell)
 
+This single MCP server now exposes both transcript-audit tools and safe local inspection tools like backend health, route listing, project structure summaries, dataset discovery, and training-artifact inspection.
+
 ```powershell
 @'
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0.1"}}}
@@ -170,10 +172,6 @@ $req | .\packages\api\.venv\Scripts\python.exe packages/api/mcp_server.py
 ```
 
 Expected: output contains `"status": "success"` in tool response text.
-
-### Local MCP Server
-
-For safe project inspection and backend discovery tools, see `mcp_server/README.md`.
 
 ### Codex / AI Agent Bootstrap (copy-paste)
 
